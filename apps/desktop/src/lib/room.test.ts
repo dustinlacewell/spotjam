@@ -294,6 +294,24 @@ describe("RoomClient handshake", () => {
   });
 });
 
+describe("RoomClient status", () => {
+  it("tells status listeners when the first snapshot lands", async () => {
+    const { room, latest, keypair } = makeRoom();
+    const statuses: ConnectionStatus[] = [];
+    room.onStatus((status) => statuses.push(status));
+    await greet(latest(), keypair.publicKey);
+
+    latest().deliver({ type: "room-state", snapshot: snapshot() });
+    await settle();
+
+    // The UI subscribes to status, not to snapshots. Flipping `synced` inside
+    // the view without telling it leaves the room reading "joining" forever.
+    expect(statuses.at(-1)).toEqual({ socket: "connected", synced: true });
+    expect(room.getStatus().synced).toBe(true);
+    room.destroy();
+  });
+});
+
 describe("RoomClient ops", () => {
   async function connected() {
     const harness = makeRoom();

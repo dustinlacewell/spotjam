@@ -263,6 +263,9 @@ function statusClass(status: ConnectionStatus): string {
 
 function statusLabel(status: ConnectionStatus, listeners: number): string {
   if (status.socket === "disconnected") return "disconnected";
-  if (status.socket === "connecting" || !status.synced) return "connecting";
+  if (status.socket === "connecting") return "connecting";
+  // Socket up, no snapshot yet: the handshake is mid-flight. Saying
+  // "connecting" here hid which half was stuck.
+  if (!status.synced) return "joining";
   return listeners === 1 ? "just you" : `${listeners} listening`;
 }

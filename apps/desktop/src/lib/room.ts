@@ -195,6 +195,10 @@ export class RoomClient {
     this.#reconnectAttempt = 0;
     this.#handshake = "greeting";
     this.#setStatus({ socket: "connected", synced: false });
+    // The handshake has four steps across two processes and a network. Without
+    // a trace of which one it reached, a stall is indistinguishable from every
+    // other stall.
+    console.info("spotjam: socket open", this.#url);
     void this.#send(helloPayload(), generation);
   }
 
@@ -211,6 +215,7 @@ export class RoomClient {
 
     if (event.type === "registered") {
       this.#handshake = "done";
+      console.info("spotjam: registered, joining", this.roomId);
       void this.#send(ops.joinRoom(this.roomId), generation);
       return;
     }
@@ -276,9 +281,20 @@ export class RoomClient {
 
     this.#advanceHandshake(event, generation);
 
+    if (event.type === "room-state" && !this.#view.status.synced) {
+      console.info("spotjam: first snapshot", event.snapshot.roomId);
+    }
+
+    const previousStatus = this.#view.status;
     const next = reduce(this.#view, event);
     if (next !== this.#view) {
       this.#view = next;
+      // reduce() flips `synced` when the first snapshot lands, but it only
+      // rewrites the view. Status listeners are a separate channel, so without
+      // this the UI never hears that the room finished joining.
+      if (next.status !== previousStatus) {
+        for (const listener of this.#statusListeners) listener(next.status);
+      }
       this.#emitChange();
     }
   }
