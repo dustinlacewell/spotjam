@@ -1,0 +1,20 @@
+# Host node_modules must never enter the image. pnpm fills them with absolute
+# symlinks into the host store (D:/... on Windows), and copying them over the
+# image's own install leaves every dependency a dangling link -- the container
+# then dies on the first import with ERR_MODULE_NOT_FOUND.
+node_modules
+**/node_modules
+
+# Build output and local state; the image builds its own.
+dist
+**/dist
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen
+apps/server/data
+
+# Never ship deploy credentials into an image layer.
+apps/server/secrets
+
+.git
+.devtool
+.vscode
