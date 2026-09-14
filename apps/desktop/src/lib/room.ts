@@ -111,8 +111,13 @@ export class RoomClient {
   #closed = false;
   /** Bumped per connection so a late reply from a dead socket is ignored. */
   #generation = 0;
-  /** How far this connection's greeting has got. Reset on every reconnect. */
-  #handshake: "greeting" | "registering" | "done" = "greeting";
+  /**
+   * How far this connection's greeting has got. Reset on every reconnect.
+   *
+   * `failed` is terminal for the connection: the server refused the name, and
+   * sending it again would only earn the same refusal.
+   */
+  #handshake: "greeting" | "registering" | "done" | "failed" = "greeting";
   /**
    * Our own sample of the local player. Used only until the server echoes a
    * sample back, which it does whenever this client is the broadcaster.
@@ -210,14 +215,30 @@ export class RoomClient {
       return;
     }
 
-    if (
+    if (event.type !== "error") return;
+
+    if (this.#isExpectedGreetingMiss(event)) {
+      this.#handshake = "registering";
+      void this.#send(registerPayload(this.#username), generation);
+      return;
+    }
+
+    // Registration itself was refused -- a name already taken, or one the
+    // server will not accept. Retrying sends the same name to the same answer,
+    // so the handshake stops here and the error stands for the UI to show.
+    // Without this the client would sit in `registering` forever, silently.
+    if (this.#handshake === "registering") {
+      this.#handshake = "failed";
+    }
+  }
+
+  /** The first-connection miss the handshake exists to answer. */
+  #isExpectedGreetingMiss(event: ServerEvent): boolean {
+    return (
       event.type === "error" &&
       event.code === "unknown-identity" &&
       this.#handshake === "greeting"
-    ) {
-      this.#handshake = "registering";
-      void this.#send(registerPayload(this.#username), generation);
-    }
+    );
   }
 
   #onClose(generation: number): void {
@@ -246,7 +267,10 @@ export class RoomClient {
     const event = parseServerEvent(data);
     if (event === null) return;
 
-    if (event.type === "error") {
+    // `unknown-identity` while greeting is the handshake working, not failing:
+    // a key registers on its first connection, and #advanceHandshake is about
+    // to do exactly that. Warning here would report every first run as broken.
+    if (event.type === "error" && !this.#isExpectedGreetingMiss(event)) {
       console.warn("spotjam: server error", event.code, event.message);
     }
 

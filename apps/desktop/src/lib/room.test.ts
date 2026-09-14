@@ -235,6 +235,63 @@ describe("RoomClient handshake", () => {
     expect(socket.types().filter((type) => type === "register")).toHaveLength(1);
     room.destroy();
   });
+
+  it("stops when registration is refused instead of hanging", async () => {
+    const { room, latest } = makeRoom({ username: "alice" });
+    const socket = latest();
+    socket.open();
+    await settle();
+
+    socket.deliver({
+      type: "error",
+      code: "unknown-identity",
+      message: "This key has not registered a username.",
+    });
+    await settle();
+
+    // The name is already someone else's. Sending it again earns the same
+    // answer, so the handshake must stop and let the UI surface the error.
+    socket.deliver({
+      type: "error",
+      code: "username-taken",
+      message: "Registration refused: username-taken.",
+    });
+    await settle();
+
+    expect(socket.types()).toEqual(["hello", "register"]);
+    expect(room.lastError()?.code).toBe("username-taken");
+    room.destroy();
+  });
+
+  it("keeps quiet about the first-run miss but reports a real error", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { room, latest } = makeRoom({ username: "alice" });
+      const socket = latest();
+      socket.open();
+      await settle();
+
+      // Every first run provokes this; reporting it reads as a broken app.
+      socket.deliver({
+        type: "error",
+        code: "unknown-identity",
+        message: "This key has not registered a username.",
+      });
+      await settle();
+      expect(warn).not.toHaveBeenCalled();
+
+      socket.deliver({
+        type: "error",
+        code: "username-taken",
+        message: "Registration refused: username-taken.",
+      });
+      await settle();
+      expect(warn).toHaveBeenCalledTimes(1);
+      room.destroy();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 describe("RoomClient ops", () => {
