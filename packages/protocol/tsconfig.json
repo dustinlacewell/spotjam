@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    // This package runs in both the browser (via Vite) and Node (the server),
+    // so it leans only on globals common to both: TextEncoder, crypto.
+    "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "skipLibCheck": true,
