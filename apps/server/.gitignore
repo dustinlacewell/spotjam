@@ -1,1 +1,3 @@
 secrets/
+# SQLite lives here by default; identities are runtime state, not source.
+data/

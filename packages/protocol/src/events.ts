@@ -72,6 +72,8 @@ export interface ErrorEvent {
   /** Machine-readable; UI maps it to copy. */
   code:
     | "bad-signature"
+    /** Timestamp outside the replay window — usually a skewed client clock. */
+    | "stale-envelope"
     | "replay"
     | "unknown-identity"
     | "username-taken"

@@ -1,0 +1,189 @@
+.page {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(30, 215, 96, 0.08), transparent 60%),
+    var(--bg);
+}
+
+.card {
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+}
+
+.mark {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.markDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.tagline {
+  margin: 0 0 var(--space-5);
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.modes {
+  width: 100%;
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  margin-bottom: var(--space-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.mode,
+.modeActive {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--text-dim);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.mode:hover {
+  color: var(--text);
+}
+
+.modeActive {
+  background: var(--bg-card-hover);
+  color: var(--text);
+}
+
+.form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.input {
+  width: 100%;
+  padding: 14px var(--space-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  text-align: center;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.input:focus {
+  border-color: var(--accent-dim);
+}
+
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+.browse {
+  padding: 14px var(--space-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.browse:hover {
+  border-color: var(--accent-dim);
+  color: var(--text);
+}
+
+/* Reserves its line whether or not there is a message, so the button below
+   does not jump as the user types. */
+.hint {
+  min-height: 16px;
+  margin: calc(var(--space-2) * -1) 0 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.notice {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.path {
+  display: block;
+  padding: var(--space-3);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+  user-select: all;
+}
+
+.button {
+  padding: 14px var(--space-4);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-md);
+  color: #06210f;
+  font-weight: 700;
+  font-size: 15px;
+  transition:
+    background 0.15s ease,
+    transform 0.1s ease;
+}
+
+.button:hover:not(:disabled) {
+  background: #24e46b;
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.button:disabled {
+  background: var(--bg-card-hover);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}

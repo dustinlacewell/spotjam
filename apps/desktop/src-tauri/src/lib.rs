@@ -1,3 +1,4 @@
+mod identity;
 mod spotify;
 mod track_metadata;
 
@@ -7,6 +8,7 @@ use spotify::SpotifyBridge;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(SpotifyBridge::new())
         .invoke_handler(tauri::generate_handler![
             spotify::spotify_play_track,
@@ -19,6 +21,12 @@ pub fn run() {
             spotify::spotify_get_queue,
             spotify::spotify_fetch_playlist,
             track_metadata::fetch_track_metadata,
+            identity::identity_load,
+            identity::identity_create,
+            identity::identity_sign,
+            identity::identity_import,
+            identity::identity_export_path,
+            identity::identity_username,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

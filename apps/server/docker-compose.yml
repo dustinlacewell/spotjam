@@ -1,8 +1,12 @@
 services:
   signaling:
     build:
-      context: .
+      # The repo root, so the build can reach packages/protocol.
+      context: ../..
+      dockerfile: apps/server/Dockerfile
     restart: unless-stopped
+    volumes:
+      - spotjam-data:/data
 
   tunnel:
     image: cloudflare/cloudflared:latest
@@ -13,3 +17,6 @@ services:
     restart: unless-stopped
     depends_on:
       - signaling
+
+volumes:
+  spotjam-data:
