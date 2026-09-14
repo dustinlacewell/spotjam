@@ -2,20 +2,19 @@ import { useState } from "react";
 import styles from "./JoinRoom.module.css";
 
 export function JoinRoom({
-  initialUsername,
+  username,
   initialRoomId,
   onJoin,
 }: {
-  initialUsername: string;
+  /** Read-only: the identity owns the name, so there is nothing to type. */
+  username: string;
   initialRoomId: string;
-  onJoin: (username: string, roomId: string) => void;
+  onJoin: (roomId: string) => void;
 }) {
-  const [username, setUsername] = useState(initialUsername);
   const [roomId, setRoomId] = useState(initialRoomId);
 
-  const trimmedUsername = username.trim();
   const normalizedRoomId = roomId.trim().toLowerCase();
-  const canJoin = trimmedUsername !== "" && normalizedRoomId !== "";
+  const canJoin = normalizedRoomId !== "";
 
   return (
     <div className={styles.page}>
@@ -30,24 +29,16 @@ export function JoinRoom({
           className={styles.form}
           onSubmit={(e) => {
             e.preventDefault();
-            if (canJoin) onJoin(trimmedUsername, normalizedRoomId);
+            if (canJoin) onJoin(normalizedRoomId);
           }}
         >
-          <input
-            className={styles.input}
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Your name"
-            autoFocus={initialUsername === ""}
-            spellCheck={false}
-            maxLength={32}
-          />
+          <p className={styles.tagline}>Joining as {username}</p>
           <input
             className={styles.input}
             value={roomId}
             onChange={(e) => setRoomId(e.target.value)}
             placeholder="Room code"
-            autoFocus={initialUsername !== ""}
+            autoFocus
             spellCheck={false}
           />
           <button className={styles.button} type="submit" disabled={!canJoin}>

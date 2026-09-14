@@ -18,7 +18,7 @@ export function QueueItemCard({
 }: {
   item: QueueItem;
   isPlaying: boolean;
-  /** Overrides the `addedBy` chip; use the queue owner's name in session views. */
+  /** The name chip. Empty hides it — your own queue needs no name. */
   ownerLabel?: string;
   onRemove?: () => void;
   onSendToTop?: () => void;
@@ -31,7 +31,7 @@ export function QueueItemCard({
   onDragEnd?: (e: React.DragEvent) => void;
 }) {
   const metadata = useTrackMetadata(item.uri);
-  const label = (ownerLabel ?? item.addedBy).trim();
+  const label = (ownerLabel ?? "").trim();
 
   // Every trailing slot is always rendered so the columns never reflow: an
   // absent control leaves an empty box of the same width, and hover-only

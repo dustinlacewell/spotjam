@@ -104,6 +104,5 @@ function cardItem(track: ParsedTrack, index: number): QueueItem {
     id: `${track.trackId}-${index}`,
     uri: track.uri,
     trackId: track.trackId,
-    addedBy: "",
   };
 }

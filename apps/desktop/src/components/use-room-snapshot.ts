@@ -6,6 +6,7 @@ import type {
   Progress,
   QueueItem,
   Room,
+  RoomError,
   SessionEntry,
 } from "../lib/room";
 
@@ -14,14 +15,17 @@ export interface RoomSnapshot {
   participants: Participant[];
   sessionQueue: SessionEntry[];
   pointer: PlaybackPointer;
-  leaderProgress: Progress | null;
+  /** This client's own sample; the server keeps no progress. */
+  myProgress: Progress | null;
   myQueue: QueueItem[];
-  queueOf: (userId: string) => QueueItem[];
+  queueOf: (pubkey: string) => QueueItem[];
+  /** The last typed error from the server, for the UI to surface. */
+  error: RoomError | null;
 }
 
 /**
  * Subscribes to the room and re-reads every getter on each change.
- * The tick counter is the only state: Room owns the data, this hook owns
+ * The tick counter is the only state: the room owns the data, this hook owns
  * nothing but the invalidation signal.
  */
 export function useRoomSnapshot(room: Room): RoomSnapshot {
@@ -39,15 +43,16 @@ export function useRoomSnapshot(room: Room): RoomSnapshot {
     };
   }, [room]);
 
-  const queueOf = useCallback((userId: string) => room.queueOf(userId), [room]);
+  const queueOf = useCallback((pubkey: string) => room.queueOf(pubkey), [room]);
 
   return {
     status,
     participants: room.participants(),
     sessionQueue: room.sessionQueue(),
     pointer: room.getPlaybackPointer(),
-    leaderProgress: room.leaderProgress(),
+    myProgress: room.myProgress(),
     myQueue: room.myQueue(),
     queueOf,
+    error: room.lastError(),
   };
 }

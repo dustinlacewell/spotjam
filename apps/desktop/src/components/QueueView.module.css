@@ -59,6 +59,15 @@
   color: var(--danger);
 }
 
+.errorBanner {
+  margin: 0;
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--danger);
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
 .roomCode {
   font-family: var(--font-mono);
   font-size: 12px;

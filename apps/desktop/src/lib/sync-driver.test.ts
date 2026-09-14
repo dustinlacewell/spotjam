@@ -5,11 +5,12 @@ import type { PlaybackPointer, Room, SessionEntry } from "./room";
 
 const URI = "spotify:track:x";
 const EPOCH = 1_700_000_000_000;
+const OWNER = "aa".repeat(32);
 
 function playingPointer(overrides: Partial<PlaybackPointer> = {}): PlaybackPointer {
   return {
     itemId: "i1",
-    ownerId: "a",
+    ownerPubkey: OWNER,
     uri: URI,
     startedAtEpochMs: EPOCH,
     isPaused: false,
@@ -20,7 +21,7 @@ function playingPointer(overrides: Partial<PlaybackPointer> = {}): PlaybackPoint
 
 const NULL_POINTER: PlaybackPointer = {
   itemId: null,
-  ownerId: null,
+  ownerPubkey: null,
   uri: null,
   startedAtEpochMs: 0,
   isPaused: false,
@@ -31,33 +32,35 @@ const NEXT_URI = "spotify:track:y";
 
 function entry(id: string, uri: string): SessionEntry {
   return {
-    item: { id, uri, trackId: id, addedBy: "a" },
-    ownerId: "a",
+    item: { id, uri, trackId: id },
+    ownerPubkey: OWNER,
     ownerName: "alice",
   };
 }
 
-/** The slice of Room that SyncDriver actually touches, plus test controls. */
+/**
+ * The slice of RoomClient that SyncDriver touches, plus test controls.
+ *
+ * It serves a snapshot rather than computing one: the server decides the
+ * session queue and the pointer, so the fake just hands them over.
+ */
 function makeRoom(pointer: PlaybackPointer) {
   const listeners = new Set<() => void>();
   let queue: SessionEntry[] = [entry("i2", NEXT_URI)];
   const fake = {
-    doc: { clientID: 1 },
-    connectedClientIds: () => [1],
     sessionQueue: (): SessionEntry[] => queue,
     getPlaybackPointer: () => pointer,
-    advance: vi.fn(),
     setMyProgress: vi.fn(),
     onChange: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    /** Replaces the pointer and notifies the driver, as a real doc update would. */
+    /** Replaces the pointer and notifies the driver, as a new snapshot would. */
     setPointer(next: PlaybackPointer) {
       pointer = next;
       for (const listener of listeners) listener();
     },
-    /** Replaces the session queue and notifies the driver, as a real doc update would. */
+    /** Replaces the session queue and notifies the driver, as a new snapshot would. */
     setQueue(next: SessionEntry[]) {
       queue = next;
       for (const listener of listeners) listener();
@@ -110,60 +113,6 @@ describe("SyncDriver", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  describe("track-end detection", () => {
-    it("does not advance while Spotify has never reported our track", async () => {
-      const room = makeRoom(playingPointer());
-      let state: PlayerState = {
-        trackUri: "spotify:track:other",
-        trackName: "other",
-        isPaused: false,
-        positionMs: 10_000,
-        durationMs: 200_000,
-      };
-      const invoke = makeInvoke(() => state);
-      const driver = startDriver(room, invoke);
-
-      await pollTimes(5); // 10s of mismatch
-      expect(room.advance).not.toHaveBeenCalled();
-
-      // Spotify finally lands on our track.
-      state = { ...state, trackUri: URI, positionMs: 1000 };
-      await pollTimes(1);
-      expect(room.advance).not.toHaveBeenCalled();
-
-      // Now a mismatch really is the track ending.
-      state = { ...state, trackUri: "spotify:track:next" };
-      await pollTimes(1);
-      expect(room.advance).toHaveBeenCalledTimes(1);
-
-      driver.stop();
-    });
-
-    it("re-arms the latch when a new item is applied", async () => {
-      const room = makeRoom(playingPointer());
-      let state: PlayerState = {
-        trackUri: URI,
-        trackName: "x",
-        isPaused: false,
-        positionMs: 2000,
-        durationMs: 200_000,
-      };
-      const invoke = makeInvoke(() => state);
-      const driver = startDriver(room, invoke);
-      await pollTimes(1); // observedOnTrack = true
-
-      room.setPointer(playingPointer({ itemId: "i2", uri: "spotify:track:z" }));
-      await vi.advanceTimersByTimeAsync(0);
-
-      // Spotify still reports the OLD track: a slow play command, not a track end.
-      state = { ...state, trackUri: URI };
-      await pollTimes(3);
-      expect(room.advance).not.toHaveBeenCalled();
-
-      driver.stop();
-    });
   });
 
   describe("spotify queue mirroring", () => {
@@ -333,7 +282,7 @@ describe("SyncDriver", () => {
       };
     }
 
-    it("follows Spotify into the queued track, keeping its position", async () => {
+    it("does not fight Spotify when it moves into the queued track", async () => {
       const room = makeRoom(playingPointer());
       let state = onOurTrack();
       const invoke = makeInvoke(() => state);
@@ -341,14 +290,16 @@ describe("SyncDriver", () => {
 
       await pollTimes(1); // observedOnTrack = true
       state = { ...state, trackUri: NEXT_URI, positionMs: 800 };
+      invoke.calls.length = 0;
       await pollTimes(1);
 
-      expect(room.advance).toHaveBeenCalledTimes(1);
-      expect(room.advance).toHaveBeenCalledWith(EPOCH + 4000, 800);
+      // The server moves the pointer; the driver must not seek or replay.
+      expect(invoke.names()).not.toContain("spotify_seek");
+      expect(invoke.names()).not.toContain("spotify_play_track");
       driver.stop();
     });
 
-    it("does not advance a second time from the fallback timer", async () => {
+    it("follows the server's new pointer once the snapshot lands", async () => {
       const room = makeRoom(playingPointer());
       let state = onOurTrack();
       const invoke = makeInvoke(() => state);
@@ -357,46 +308,16 @@ describe("SyncDriver", () => {
       await pollTimes(1);
       state = { ...state, trackUri: NEXT_URI, positionMs: 800 };
       await pollTimes(1);
-      expect(room.advance).toHaveBeenCalledTimes(1);
 
-      // The room really moved on: the head is consumed and the pointer follows.
-      // The old item's fallback timer must not fire behind it.
+      // The server consumed the head and pushed a pointer at the next track.
       room.setQueue([]);
       room.setPointer(
         playingPointer({ itemId: "i2", uri: NEXT_URI, startedAtEpochMs: EPOCH + 3200 }),
       );
-      await vi.advanceTimersByTimeAsync(25_000);
+      await vi.advanceTimersByTimeAsync(0);
 
-      expect(room.advance).toHaveBeenCalledTimes(1);
-      driver.stop();
-    });
-
-    it("does not advance on a peer that is not elected", async () => {
-      const room = makeRoom(playingPointer());
-      room.connectedClientIds = () => [0, 1];
-      let state = onOurTrack();
-      const invoke = makeInvoke(() => state);
-      const driver = startDriver(room, invoke);
-
-      await pollTimes(1);
-      state = { ...state, trackUri: NEXT_URI, positionMs: 800 };
-      await pollTimes(1);
-
-      expect(room.advance).not.toHaveBeenCalled();
-      driver.stop();
-    });
-
-    it("falls back to the end timer when Spotify never transitions", async () => {
-      const room = makeRoom(playingPointer());
-      const invoke = makeInvoke(() => onOurTrack());
-      const driver = startDriver(room, invoke);
-
-      await pollTimes(1); // aimed at EPOCH + 31_500
-      await vi.advanceTimersByTimeAsync(29_499);
-      expect(room.advance).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(room.advance).toHaveBeenCalledTimes(1);
+      // Spotify is already there, so it is adopted rather than replayed.
+      expect(invoke.names()).not.toContain("spotify_play_track");
       driver.stop();
     });
   });
@@ -521,6 +442,27 @@ describe("SyncDriver", () => {
       expect(seeks[0].args).toEqual({ positionMs: 22_000 });
       driver.stop();
     });
+
+    it("stops correcting drift once the clock runs past the track's duration", async () => {
+      // Started 12s ago against a 10s track: already past duration + 3s.
+      const room = makeRoom(playingPointer({ startedAtEpochMs: EPOCH - 12_000 }));
+      const state: PlayerState = {
+        trackUri: URI,
+        trackName: "x",
+        isPaused: false,
+        positionMs: 10_000,
+        durationMs: 10_000,
+      };
+      const invoke = makeInvoke(() => state);
+      const driver = startDriver(room, invoke);
+      await vi.advanceTimersByTimeAsync(0);
+      invoke.calls.length = 0;
+
+      await pollTimes(1);
+
+      expect(invoke.names()).not.toContain("spotify_seek");
+      driver.stop();
+    });
   });
 
   describe("progress reporting", () => {
@@ -591,6 +533,26 @@ describe("SyncDriver", () => {
       expect(room.setMyProgress).toHaveBeenCalledWith(null);
       driver.stop();
     });
+
+    it("clears progress when the track's own end arrives", async () => {
+      const room = makeRoom(playingPointer());
+      const track: PlayerState = {
+        trackUri: URI,
+        trackName: "x",
+        isPaused: false,
+        positionMs: 2000,
+        durationMs: 30_000,
+      };
+      const invoke = makeInvoke(() => track);
+      const driver = startDriver(room, invoke);
+
+      await pollTimes(1); // schedules the end for EPOCH + 31_500
+      (room.setMyProgress as ReturnType<typeof vi.fn>).mockClear();
+      await vi.advanceTimersByTimeAsync(29_500);
+
+      expect(room.setMyProgress).toHaveBeenCalledWith(null);
+      driver.stop();
+    });
   });
 
   describe("remote seek", () => {
@@ -642,129 +604,38 @@ describe("SyncDriver", () => {
     });
   });
 
-  describe("precise end timer", () => {
-    const track: PlayerState = {
-      trackUri: URI,
-      trackName: "x",
-      isPaused: false,
-      positionMs: 2000,
-      durationMs: 30_000,
-    };
-
-    it("advances 1.5s after the shared clock reaches the track's end", async () => {
+  describe("the server owns advancing", () => {
+    it("exposes no way for the driver to move the pointer", async () => {
       const room = makeRoom(playingPointer());
-      const invoke = makeInvoke(() => track);
+      const invoke = makeInvoke(() => null);
       const driver = startDriver(room, invoke);
+      await vi.advanceTimersByTimeAsync(0);
 
-      await pollTimes(1); // schedules for EPOCH + 31_500
-      await vi.advanceTimersByTimeAsync(29_499); // now EPOCH + 31_499
-      expect(room.advance).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(room.advance).toHaveBeenCalledTimes(1);
+      // The old driver called room.advance(); the fake room no longer has one,
+      // and nothing the driver does may reintroduce it.
+      expect("advance" in room).toBe(false);
       driver.stop();
     });
 
-    it("does not advance when the room pauses before the end", async () => {
-      const room = makeRoom(playingPointer());
-      const invoke = makeInvoke(() => track);
+    it("keeps polling a finished track without replaying it", async () => {
+      // Spotify sits on our track, parked at the very end: it is over.
+      const room = makeRoom(playingPointer({ startedAtEpochMs: EPOCH - 60_000 }));
+      const finished: PlayerState = {
+        trackUri: URI,
+        trackName: "x",
+        isPaused: true,
+        positionMs: 10_000,
+        durationMs: 10_000,
+      };
+      const invoke = makeInvoke(() => finished);
       const driver = startDriver(room, invoke);
-
-      await pollTimes(1);
-      room.setPointer(playingPointer({ isPaused: true, pausedAtOffsetMs: 3000 }));
-      await vi.advanceTimersByTimeAsync(60_000);
-
-      expect(room.advance).not.toHaveBeenCalled();
-      driver.stop();
-    });
-
-    it("does not advance when this peer is not elected", async () => {
-      const room = makeRoom(playingPointer());
-      room.connectedClientIds = () => [0, 1];
-      const invoke = makeInvoke(() => track);
-      const driver = startDriver(room, invoke);
-
-      await pollTimes(1);
-      await vi.advanceTimersByTimeAsync(31_500);
-
-      expect(room.advance).not.toHaveBeenCalled();
-      driver.stop();
-    });
-
-    it("reschedules when a seek moves the start of the track", async () => {
-      const room = makeRoom(playingPointer());
-      const invoke = makeInvoke(() => track);
-      const driver = startDriver(room, invoke);
-
-      await pollTimes(1); // aimed at EPOCH + 31_500
-
-      // Seek back 10s: the track now ends 10s later.
-      room.setPointer(playingPointer({ startedAtEpochMs: EPOCH + 10_000 }));
-      await pollTimes(1); // re-aims at EPOCH + 41_500
-
-      await vi.advanceTimersByTimeAsync(37_499); // now EPOCH + 41_499
-      expect(room.advance).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(room.advance).toHaveBeenCalledTimes(1);
-      driver.stop();
-    });
-  });
-
-  describe("duration end-signal", () => {
-    const shortTrack: PlayerState = {
-      trackUri: URI,
-      trackName: "x",
-      isPaused: false,
-      positionMs: 10_000,
-      durationMs: 10_000,
-    };
-
-    it("advances once the shared clock passes duration + 3s", async () => {
-      // Started 12s ago: under duration + 3000 at the first poll, over it later.
-      const room = makeRoom(playingPointer({ startedAtEpochMs: EPOCH - 12_000 }));
-      const invoke = makeInvoke(() => shortTrack);
-      const driver = startDriver(room, invoke);
-
-      await pollTimes(1); // now = EPOCH + 2000, elapsed 14_000 > 13_000
-
-      expect(room.advance).toHaveBeenCalledTimes(1);
-      driver.stop();
-    });
-
-    it("does not advance while still inside duration + 3s", async () => {
-      const room = makeRoom(playingPointer({ startedAtEpochMs: EPOCH - 5000 }));
-      const invoke = makeInvoke(() => shortTrack);
-      const driver = startDriver(room, invoke);
-
-      await pollTimes(1); // elapsed 7000 < 13_000
-
-      expect(room.advance).not.toHaveBeenCalled();
-      driver.stop();
-    });
-
-    it("does not advance when this peer is not elected", async () => {
-      const room = makeRoom(playingPointer({ startedAtEpochMs: EPOCH - 12_000 }));
-      room.connectedClientIds = () => [0, 1];
-      const invoke = makeInvoke(() => shortTrack);
-      const driver = startDriver(room, invoke);
-
-      await pollTimes(1);
-
-      expect(room.advance).not.toHaveBeenCalled();
-      driver.stop();
-    });
-
-    it("does not advance while the room is paused", async () => {
-      const room = makeRoom(
-        playingPointer({ startedAtEpochMs: EPOCH - 60_000, isPaused: true, pausedAtOffsetMs: 5000 }),
-      );
-      const invoke = makeInvoke(() => shortTrack);
-      const driver = startDriver(room, invoke);
+      await vi.advanceTimersByTimeAsync(0);
+      invoke.calls.length = 0; // drop the initial apply
 
       await pollTimes(3);
 
-      expect(room.advance).not.toHaveBeenCalled();
+      // The server moves the pointer; the driver never restarts the track.
+      expect(invoke.names()).not.toContain("spotify_play_track");
       driver.stop();
     });
   });

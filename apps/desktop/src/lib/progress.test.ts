@@ -7,7 +7,7 @@ const EPOCH = 1_700_000_000_000;
 function pointer(overrides: Partial<PlaybackPointer> = {}): PlaybackPointer {
   return {
     itemId: "i1",
-    ownerId: "a",
+    ownerPubkey: "aa".repeat(32),
     uri: "spotify:track:x",
     startedAtEpochMs: EPOCH,
     isPaused: false,

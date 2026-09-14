@@ -5,12 +5,14 @@ export type Selection = "session" | string;
 
 export function Sidebar({
   participants,
-  playingOwnerId,
+  myPubkey,
+  playingOwnerPubkey,
   selection,
   onSelect,
 }: {
   participants: Participant[];
-  playingOwnerId: string | null;
+  myPubkey: string;
+  playingOwnerPubkey: string | null;
   selection: Selection;
   onSelect: (selection: Selection) => void;
 }) {
@@ -29,13 +31,13 @@ export function Sidebar({
 
       <ul className={styles.list}>
         {participants.map((participant) => (
-          <li key={participant.clientId}>
+          <li key={participant.pubkey}>
             <button
               type="button"
               className={
-                selection === participant.userId ? styles.rowSelected : styles.row
+                selection === participant.pubkey ? styles.rowSelected : styles.row
               }
-              onClick={() => onSelect(participant.userId)}
+              onClick={() => onSelect(participant.pubkey)}
             >
               <span className={styles.iconSlot}>
                 {participant.broadcasting && (
@@ -43,12 +45,12 @@ export function Sidebar({
                 )}
               </span>
               <span className={styles.name}>{participant.username}</span>
-              {participant.userId === playingOwnerId && (
+              {participant.pubkey === playingOwnerPubkey && (
                 <span className={styles.playingGlyph} title="Playing now">
                   ♪
                 </span>
               )}
-              {participant.isMe && <span className={styles.youTag}>you</span>}
+              {participant.pubkey === myPubkey && <span className={styles.youTag}>you</span>}
             </button>
           </li>
         ))}

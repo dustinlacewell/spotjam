@@ -9,7 +9,6 @@ import { loadSessionPrefs, saveSessionPrefs } from "./lib/session-prefs";
 
 interface Session {
   roomId: string;
-  username: string;
 }
 
 /** Null until the on-disk lookup answers; then an identity, or none. */
@@ -34,13 +33,17 @@ export default function App() {
     };
   }, []);
 
+  const stored = identity.status === "ready" ? identity.identity : null;
+  const publicKey = stored?.publicKey ?? null;
+  const username = stored?.username ?? "";
+
   // The room and its driver live and die with the session. Creating them
   // here (not in the join handler) means the cleanup only ever stops the
   // exact instances this effect made, so a re-render cannot kill a live
   // driver.
   useEffect(() => {
-    if (!session) return;
-    const newRoom = new Room(session.roomId, { userId: prefs.userId, username: session.username });
+    if (!session || publicKey === null) return;
+    const newRoom = new Room(session.roomId, { publicKey, username });
     const driver = new SyncDriver(newRoom);
     driver.start();
     setRoom(newRoom);
@@ -49,11 +52,11 @@ export default function App() {
       newRoom.destroy();
       setRoom(null);
     };
-  }, [session, prefs.userId]);
+  }, [session, publicKey, username]);
 
-  function handleJoin(username: string, roomId: string) {
-    saveSessionPrefs({ userId: prefs.userId, username, lastRoomId: roomId });
-    setSession({ roomId, username });
+  function handleJoin(roomId: string) {
+    saveSessionPrefs({ ...prefs, lastRoomId: roomId });
+    setSession({ roomId });
   }
 
   if (identity.status === "loading") return null;
@@ -64,14 +67,9 @@ export default function App() {
   }
 
   if (!session) {
-    return (
-      <JoinRoom
-        initialUsername={prefs.username}
-        initialRoomId={prefs.lastRoomId}
-        onJoin={handleJoin}
-      />
-    );
+    // The key is the account, so the name comes from the identity, not a form.
+    return <JoinRoom username={identity.identity.username} initialRoomId={prefs.lastRoomId} onJoin={handleJoin} />;
   }
   if (!room) return null;
-  return <QueueView room={room} roomId={session.roomId} username={session.username} />;
+  return <QueueView room={room} roomId={session.roomId} />;
 }

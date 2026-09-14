@@ -1,444 +1,473 @@
-import * as Y from "yjs";
-import { WebsocketProvider } from "y-websocket";
-import { broadcasterOrder, projectSessionQueue } from "./session-queue";
+// RoomClient — the socket shell around the pure core in room-client.ts.
+//
+// All the I/O lives here: the WebSocket, the reconnect timer, and the calls to
+// the Rust signer. Every decision — which op a gesture becomes, what an event
+// does to the view — belongs to room-client.ts, so this file stays a sequence
+// of named steps with no logic of its own.
+//
+// The server owns room state. This class sends signed ops and renders whatever
+// snapshot comes back; it derives nothing.
+
+import type {
+  AuthPayload,
+  Envelope,
+  Op,
+  Participant,
+  PlaybackPointer,
+  PublicKeyHex,
+  QueueItem,
+  RoomSnapshot,
+  ServerEvent,
+  SessionEntry,
+} from "@spotjam/protocol";
+import type { CanonicalValue } from "@spotjam/protocol";
+
+import { IdentityClient, identityClient } from "./identity";
 import {
-  NULL_POINTER,
-  pausedPointer,
-  resumedPointer,
-  seekedPointer,
-  startedPointer,
-} from "./playback-clock";
-import type { ParsedTrack } from "./spotify-link";
-import { shuffled } from "./shuffle";
+  INITIAL_VIEW,
+  backoffMs,
+  helloPayload,
+  isBroadcasting,
+  myQueueOf,
+  ops,
+  parseServerEvent,
+  participantsOf,
+  pointerOf,
+  queueOf,
+  reduce,
+  registerPayload,
+  sessionQueueOf,
+  usernameOf,
+  type ConnectionStatus,
+  type Progress,
+  type RoomError,
+  type RoomView,
+} from "./room-client";
 
-export interface QueueItem {
-  id: string;
-  uri: string;
-  trackId: string;
-  /** Display name of the user who added it. */
-  addedBy: string;
-}
-
-export interface PlaybackPointer {
-  itemId: string | null;
-  /** userId of the broadcaster who owns the playing item. */
-  ownerId: string | null;
-  uri: string | null;
-  /** Epoch ms at which the track was at position 0. Valid while playing. */
-  startedAtEpochMs: number;
-  isPaused: boolean;
-  /** Position frozen at pause time. Valid only while paused. */
-  pausedAtOffsetMs: number;
-}
-
-/** One peer's sample of where its local player sits in the pointer's item. */
-export interface Progress {
-  itemId: string;
-  positionMs: number;
-  durationMs: number;
-  sampledAtEpochMs: number;
-}
-
-export interface Participant {
-  clientId: number;
-  userId: string;
-  username: string;
-  broadcasting: boolean;
-  isMe: boolean;
-}
-
-export interface ConnectionStatus {
-  socket: "connecting" | "connected" | "disconnected";
-  synced: boolean;
-}
-
-export interface SessionEntry {
-  item: QueueItem;
-  ownerId: string;
-  ownerName: string;
-}
-
-const RELAY_URL = "wss://yjs.ldlework.com";
+export type {
+  ConnectionStatus,
+  Progress,
+  RoomError,
+  SocketPhase,
+} from "./room-client";
+export { toQueueItems } from "./room-client";
+export type {
+  Participant,
+  PlaybackPointer,
+  QueueItem,
+  RoomSnapshot,
+  SessionEntry,
+} from "@spotjam/protocol";
 
 /**
- * A joined room: a shared Yjs document synced over a WebSocket relay.
- * Holds one queue per user plus the single playback pointer everyone
- * follows, and projects them into the round-robin session queue. Pure
- * shared state — no Spotify here; SyncDriver does that.
+ * The deployed relay host. The spotjam server takes this hostname over from
+ * the old Yjs relay, so existing installs keep working without a new address.
  */
-export class Room {
-  readonly doc: Y.Doc;
-  readonly myUserId: string;
+export const DEFAULT_SERVER_URL = "wss://yjs.ldlework.com";
 
-  private readonly queues: Y.Map<Y.Array<QueueItem>>;
-  private readonly playback: Y.Map<unknown>;
-  private readonly provider: WebsocketProvider;
+/** The socket surface this class needs. The browser's WebSocket satisfies it. */
+export interface SocketLike {
+  send(data: string): void;
+  close(): void;
+  onopen: ((event: unknown) => void) | null;
+  onclose: ((event: unknown) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onmessage: ((event: { data: unknown }) => void) | null;
+}
 
-  private status: ConnectionStatus = { socket: "connecting", synced: false };
-  private readonly statusListeners = new Set<(status: ConnectionStatus) => void>();
-  private readonly changeListeners = new Set<() => void>();
-  private readonly unsubscribes: Array<() => void> = [];
+export type SocketFactory = (url: string) => SocketLike;
 
-  constructor(roomId: string, identity: { userId: string; username: string }) {
-    this.myUserId = identity.userId;
-    this.doc = new Y.Doc();
-    this.queues = this.doc.getMap<Y.Array<QueueItem>>("queues");
-    this.playback = this.doc.getMap("playback");
-    this.provider = new WebsocketProvider(RELAY_URL, `spotjam-${roomId}`, this.doc);
-    this.provider.awareness.setLocalState({
-      userId: identity.userId,
-      username: identity.username,
-      broadcasting: false,
-    });
-    this.wireStatusEvents();
-    this.wireChangeEvents();
+export interface RoomOptions {
+  /** Overridden in tests; defaults to the real WebSocket. */
+  socketFactory?: SocketFactory;
+  url?: string;
+  identity?: IdentityClient;
+  /** Injected so tests need no real timers for backoff. */
+  setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
+  now?: () => number;
+}
+
+function defaultSocketFactory(url: string): SocketLike {
+  return new WebSocket(url) as unknown as SocketLike;
+}
+
+/**
+ * A joined room, backed by the spotjam server.
+ *
+ * Mutating methods are fire-and-forget: they sign an op, send it, and wait for
+ * the snapshot the server broadcasts back. Nothing is applied locally first,
+ * so the UI can never disagree with the server about what happened.
+ */
+export class RoomClient {
+  readonly roomId: string;
+  readonly myPubkey: PublicKeyHex;
+
+  #view: RoomView = INITIAL_VIEW;
+  #socket: SocketLike | null = null;
+  #reconnectAttempt = 0;
+  #reconnectHandle: ReturnType<typeof setTimeout> | null = null;
+  #closed = false;
+  /** Bumped per connection so a late reply from a dead socket is ignored. */
+  #generation = 0;
+  /** How far this connection's greeting has got. Reset on every reconnect. */
+  #handshake: "greeting" | "registering" | "done" = "greeting";
+  /** Our own sample of the local player. The server keeps no progress. */
+  #myProgress: Progress | null = null;
+
+  readonly #username: string;
+  readonly #url: string;
+  readonly #identity: IdentityClient;
+  readonly #socketFactory: SocketFactory;
+  readonly #setTimer: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  readonly #clearTimer: (handle: ReturnType<typeof setTimeout>) => void;
+  readonly #now: () => number;
+
+  readonly #statusListeners = new Set<(status: ConnectionStatus) => void>();
+  readonly #changeListeners = new Set<() => void>();
+
+  constructor(
+    roomId: string,
+    identity: { publicKey: PublicKeyHex; username: string },
+    options: RoomOptions = {},
+  ) {
+    this.roomId = roomId;
+    this.myPubkey = identity.publicKey;
+    this.#username = identity.username;
+    this.#url = options.url ?? DEFAULT_SERVER_URL;
+    this.#identity = options.identity ?? identityClient;
+    this.#socketFactory = options.socketFactory ?? defaultSocketFactory;
+    this.#setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+    this.#clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle));
+    this.#now = options.now ?? Date.now;
+
+    this.#connect();
+  }
+
+  // --- connection ----------------------------------------------------
+
+  /** Open a socket and wire it. Every reconnect comes back through here. */
+  #connect(): void {
+    if (this.#closed) return;
+    this.#generation += 1;
+    const generation = this.#generation;
+
+    this.#setStatus({ socket: "connecting", synced: false });
+
+    let socket: SocketLike;
+    try {
+      socket = this.#socketFactory(this.#url);
+    } catch (error) {
+      console.error("spotjam: could not open socket", this.#url, error);
+      this.#scheduleReconnect();
+      return;
+    }
+
+    this.#socket = socket;
+    socket.onopen = () => this.#onOpen(generation);
+    socket.onmessage = (event) => this.#onMessage(event.data, generation);
+    socket.onclose = () => this.#onClose(generation);
+    socket.onerror = (event) => {
+      // A socket error is always followed by a close, which is what actually
+      // drives the reconnect. Logging here keeps the cause visible.
+      console.warn("spotjam: websocket error", this.#url, event);
+    };
+  }
+
+  /**
+   * A fresh connection announces who we are.
+   *
+   * Only the greeting goes out here. What follows depends on the server's
+   * answer, which arrives later over the socket, so the rest of the handshake
+   * is driven from #onMessage rather than guessed at now.
+   */
+  #onOpen(generation: number): void {
+    if (generation !== this.#generation) return;
+    this.#reconnectAttempt = 0;
+    this.#handshake = "greeting";
+    this.#setStatus({ socket: "connected", synced: false });
+    void this.#send(helloPayload(), generation);
+  }
+
+  /**
+   * Carry the handshake forward on what the server actually said.
+   *
+   * `registered` means the key is known and the room can be asked for.
+   * `unknown-identity` while greeting means this key has never claimed a name,
+   * so the one stored on this machine is registered and the server answers
+   * with `registered` — which lands back here and does the join.
+   */
+  #advanceHandshake(event: ServerEvent, generation: number): void {
+    if (this.#handshake === "done") return;
+
+    if (event.type === "registered") {
+      this.#handshake = "done";
+      void this.#send(ops.joinRoom(this.roomId), generation);
+      return;
+    }
+
+    if (
+      event.type === "error" &&
+      event.code === "unknown-identity" &&
+      this.#handshake === "greeting"
+    ) {
+      this.#handshake = "registering";
+      void this.#send(registerPayload(this.#username), generation);
+    }
+  }
+
+  #onClose(generation: number): void {
+    if (generation !== this.#generation) return;
+    this.#socket = null;
+    this.#setStatus({ socket: "disconnected", synced: false });
+    this.#scheduleReconnect();
+  }
+
+  #scheduleReconnect(): void {
+    if (this.#closed || this.#reconnectHandle !== null) return;
+    const delay = backoffMs(this.#reconnectAttempt);
+    this.#reconnectAttempt += 1;
+    this.#reconnectHandle = this.#setTimer(() => {
+      this.#reconnectHandle = null;
+      this.#connect();
+    }, delay);
+  }
+
+  // --- messages ------------------------------------------------------
+
+  /** A frame from a socket we have already replaced is not this room's news. */
+  #onMessage(data: unknown, generation: number): void {
+    if (generation !== this.#generation) return;
+    if (typeof data !== "string") return;
+    const event = parseServerEvent(data);
+    if (event === null) return;
+
+    if (event.type === "error") {
+      console.warn("spotjam: server error", event.code, event.message);
+    }
+
+    this.#advanceHandshake(event, generation);
+
+    const next = reduce(this.#view, event);
+    if (next !== this.#view) {
+      this.#view = next;
+      this.#emitChange();
+    }
+  }
+
+  /**
+   * Sign a payload and put it on the wire.
+   *
+   * False means it did not go: the socket died, the generation moved on, or
+   * the signer refused. Callers use that to abandon a stale handshake.
+   */
+  async #send(payload: Op | AuthPayload, generation: number): Promise<boolean> {
+    if (generation !== this.#generation) return false;
+
+    let envelope: Envelope<CanonicalValue>;
+    try {
+      // Ops and auth payloads are declared as interfaces, which carry no index
+      // signature, so TypeScript will not widen them to CanonicalValue. They
+      // are plain JSON of exactly that shape; the protocol's own `seal` signs
+      // the same values on the server side.
+      const value = payload as unknown as CanonicalValue;
+      envelope = await this.#identity.seal(value, this.myPubkey, this.#now());
+    } catch (error) {
+      console.error("spotjam: could not sign message", error);
+      return false;
+    }
+
+    // Signing is async, so the socket may have gone while we waited.
+    if (generation !== this.#generation) return false;
+    const socket = this.#socket;
+    if (socket === null) return false;
+
+    try {
+      socket.send(JSON.stringify(envelope));
+      return true;
+    } catch (error) {
+      console.warn("spotjam: could not send message", error);
+      return false;
+    }
+  }
+
+  /** Fire an op at the current connection. */
+  #sendOp(op: Op): void {
+    void this.#send(op, this.#generation);
   }
 
   // --- subscriptions -------------------------------------------------
 
-  private wireStatusEvents(): void {
-    this.provider.on("status", ({ status }: { status: ConnectionStatus["socket"] }) => {
-      this.updateStatus({ socket: status });
-    });
-    this.provider.on("sync", (synced: boolean) => {
-      this.updateStatus({ synced });
-    });
-    this.provider.on("connection-error", (event: unknown) => {
-      console.error("spotjam: websocket connection error", this.provider.url, event);
-    });
-    this.provider.on("connection-close", (event: unknown) => {
-      console.warn("spotjam: websocket closed", this.provider.url, event);
-    });
+  #setStatus(status: ConnectionStatus): void {
+    this.#view = { ...this.#view, status };
+    for (const listener of this.#statusListeners) listener(status);
   }
 
-  private wireChangeEvents(): void {
-    const fire = () => this.emitChange();
-    this.queues.observeDeep(fire);
-    this.playback.observe(fire);
-    this.provider.awareness.on("change", fire);
-    this.unsubscribes.push(
-      () => this.queues.unobserveDeep(fire),
-      () => this.playback.unobserve(fire),
-      () => this.provider.awareness.off("change", fire),
-    );
-  }
-
-  private updateStatus(patch: Partial<ConnectionStatus>): void {
-    this.status = { ...this.status, ...patch };
-    for (const listener of this.statusListeners) listener(this.status);
-  }
-
-  private emitChange(): void {
-    for (const listener of this.changeListeners) listener();
+  #emitChange(): void {
+    for (const listener of this.#changeListeners) listener();
   }
 
   getStatus(): ConnectionStatus {
-    return this.status;
+    return this.#view.status;
   }
 
   onStatus(listener: (status: ConnectionStatus) => void): () => void {
-    this.statusListeners.add(listener);
+    this.#statusListeners.add(listener);
     return () => {
-      this.statusListeners.delete(listener);
+      this.#statusListeners.delete(listener);
     };
   }
 
-  /** Fires after any change to queues, playback, or awareness. Re-read via the getters. */
+  /** Fires after every snapshot or error. Re-read through the getters. */
   onChange(listener: () => void): () => void {
-    this.changeListeners.add(listener);
+    this.#changeListeners.add(listener);
     return () => {
-      this.changeListeners.delete(listener);
+      this.#changeListeners.delete(listener);
     };
   }
 
-  // --- participants / awareness --------------------------------------
+  // --- reading the room ----------------------------------------------
 
-  /** Everyone currently in the room, including this client, by clientId ascending. */
+  snapshot(): RoomSnapshot | null {
+    return this.#view.snapshot;
+  }
+
+  lastError(): RoomError | null {
+    return this.#view.lastError;
+  }
+
   participants(): Participant[] {
-    const me = this.doc.clientID;
-    const found: Participant[] = [];
-    for (const [clientId, raw] of this.provider.awareness.getStates()) {
-      const state = raw as Record<string, unknown>;
-      if (typeof state?.userId !== "string") continue;
-      found.push({
-        clientId,
-        userId: state.userId,
-        username: readUsername(state),
-        broadcasting: state.broadcasting === true,
-        isMe: clientId === me,
-      });
-    }
-    return found.sort((a, b) => a.clientId - b.clientId);
+    return participantsOf(this.#view);
   }
 
-  /** Client ids that take part in election: only peers running this protocol (they publish a userId). */
-  connectedClientIds(): number[] {
-    return this.participants().map((p) => p.clientId);
-  }
-
-  isBroadcasting(): boolean {
-    return this.provider.awareness.getLocalState()?.broadcasting === true;
-  }
-
-  setBroadcasting(on: boolean): void {
-    this.provider.awareness.setLocalStateField("broadcasting", on);
-  }
-
-  /** Publishes where my local player is, so peers can render a progress bar. */
-  setMyProgress(progress: Progress | null): void {
-    this.provider.awareness.setLocalStateField("progress", progress);
-  }
-
-  /**
-   * Progress reported for the current pointer item by the lowest-clientId peer
-   * that has one. Null when the pointer is empty or nobody reports on it.
-   */
-  leaderProgress(): Progress | null {
-    const itemId = this.getPlaybackPointer().itemId;
-    if (itemId === null) return null;
-    let best: Progress | null = null;
-    let bestClientId = Number.POSITIVE_INFINITY;
-    for (const [clientId, raw] of this.provider.awareness.getStates()) {
-      if (clientId >= bestClientId) continue;
-      const progress = readProgress((raw as Record<string, unknown>)?.progress);
-      if (!progress || progress.itemId !== itemId) continue;
-      best = progress;
-      bestClientId = clientId;
-    }
-    return best;
-  }
-
-  // --- queues --------------------------------------------------------
-
-  queueOf(userId: string): QueueItem[] {
-    return this.queues.get(userId)?.toArray() ?? [];
+  sessionQueue(): SessionEntry[] {
+    return sessionQueueOf(this.#view);
   }
 
   myQueue(): QueueItem[] {
-    return this.queueOf(this.myUserId);
+    return myQueueOf(this.#view);
+  }
+
+  queueOf(pubkey: PublicKeyHex): QueueItem[] {
+    return queueOf(this.#view, pubkey, this.myPubkey);
+  }
+
+  getPlaybackPointer(): PlaybackPointer {
+    return pointerOf(this.#view);
+  }
+
+  isBroadcasting(): boolean {
+    return isBroadcasting(this.#view, this.myPubkey);
+  }
+
+  usernameOf(pubkey: PublicKeyHex | null): string {
+    return usernameOf(this.#view, pubkey);
+  }
+
+  /**
+   * Our own view of the local player.
+   *
+   * The server stores no progress, so this never leaves the machine. It feeds
+   * this client's progress bar and nothing else.
+   */
+  myProgress(): Progress | null {
+    return this.#myProgress;
+  }
+
+  // --- queue ops -----------------------------------------------------
+
+  appendToMyQueue(items: QueueItem[]): void {
+    if (items.length === 0) return;
+    this.#sendOp(ops.enqueue(this.roomId, items));
   }
 
   addToMyQueue(item: QueueItem): void {
-    this.doc.transact(() => {
-      this.myQueueArray().push([item]);
-    });
+    this.appendToMyQueue([item]);
   }
 
-  /** Appends many items in one transaction, so peers see the whole batch at once. */
-  appendToMyQueue(items: QueueItem[]): void {
-    if (items.length === 0) return;
-    this.doc.transact(() => {
-      this.myQueueArray().push(items);
-    });
-  }
-
-  /** Swaps my whole queue for these items in one transaction. */
+  /** Clear, then enqueue: the protocol has no single replace op. */
   replaceMyQueue(items: QueueItem[]): void {
-    this.doc.transact(() => {
-      const array = this.myQueueArray();
-      if (array.length > 0) array.delete(0, array.length);
-      if (items.length > 0) array.push(items);
-    });
+    this.#sendOp(ops.clearQueue(this.roomId));
+    if (items.length > 0) this.#sendOp(ops.enqueue(this.roomId, items));
   }
 
   removeFromMyQueue(itemId: string): void {
-    this.doc.transact(() => {
-      const array = this.queues.get(this.myUserId);
-      if (!array) return;
-      const index = indexOfItem(array, itemId);
-      if (index !== -1) array.delete(index, 1);
-    });
+    this.#sendOp(ops.remove(this.roomId, itemId));
   }
 
   moveInMyQueue(fromIndex: number, toIndex: number): void {
-    this.doc.transact(() => {
-      const array = this.queues.get(this.myUserId);
-      if (!array) return;
-      const items = array.toArray();
-      if (fromIndex < 0 || fromIndex >= items.length) return;
-      const target = clamp(toIndex, 0, items.length - 1);
-      if (target === fromIndex) return;
-      const moved = items[fromIndex];
-      array.delete(fromIndex, 1);
-      array.insert(target, [moved]);
-    });
+    this.#sendOp(ops.move(this.roomId, fromIndex, toIndex));
   }
 
   sendToTopOfMyQueue(itemId: string): void {
-    this.doc.transact(() => {
-      const array = this.queues.get(this.myUserId);
-      if (!array) return;
-      const index = indexOfItem(array, itemId);
-      if (index <= 0) return;
-      const moved = array.get(index);
-      array.delete(index, 1);
-      array.insert(0, [moved]);
-    });
+    this.#sendOp(ops.sendToTop(this.roomId, itemId));
   }
 
-  /** Randomizes my queue's play order for every peer, in one transaction. */
   shuffleMyQueue(): void {
-    this.doc.transact(() => {
-      const array = this.myQueueArray();
-      if (array.length < 2) return;
-      const items = shuffled(array.toArray());
-      array.delete(0, array.length);
-      array.push(items);
-    });
+    this.#sendOp(ops.shuffle(this.roomId));
   }
 
   clearMyQueue(): void {
-    this.doc.transact(() => {
-      const array = this.queues.get(this.myUserId);
-      if (array && array.length > 0) array.delete(0, array.length);
-    });
-  }
-
-  /** Removes an item from any user's queue. Returns the removed item, or null if it was gone. */
-  popFromQueue(userId: string, itemId: string): QueueItem | null {
-    let removed: QueueItem | null = null;
-    this.doc.transact(() => {
-      const array = this.queues.get(userId);
-      if (!array) return;
-      const index = indexOfItem(array, itemId);
-      if (index === -1) return;
-      removed = array.get(index);
-      array.delete(index, 1);
-    });
-    return removed;
-  }
-
-  /** This user's Y.Array, created on first write so readers never materialise empty queues. */
-  private myQueueArray(): Y.Array<QueueItem> {
-    const existing = this.queues.get(this.myUserId);
-    if (existing) return existing;
-    const created = new Y.Array<QueueItem>();
-    this.queues.set(this.myUserId, created);
-    return created;
-  }
-
-  // --- session projection --------------------------------------------
-
-  sessionQueue(): SessionEntry[] {
-    const broadcasters = broadcasterOrder(this.participants());
-    const queues: Record<string, QueueItem[]> = {};
-    for (const broadcaster of broadcasters) {
-      queues[broadcaster.userId] = this.queueOf(broadcaster.userId);
-    }
-    return projectSessionQueue(broadcasters, queues, this.getPlaybackPointer().ownerId);
+    this.#sendOp(ops.clearQueue(this.roomId));
   }
 
   // --- playback ------------------------------------------------------
 
-  getPlaybackPointer(): PlaybackPointer {
-    return {
-      itemId: (this.playback.get("itemId") as string | null) ?? null,
-      ownerId: (this.playback.get("ownerId") as string | null) ?? null,
-      uri: (this.playback.get("uri") as string | null) ?? null,
-      startedAtEpochMs: (this.playback.get("startedAtEpochMs") as number) ?? 0,
-      isPaused: (this.playback.get("isPaused") as boolean) ?? false,
-      pausedAtOffsetMs: (this.playback.get("pausedAtOffsetMs") as number) ?? 0,
-    };
+  setBroadcasting(on: boolean): void {
+    this.#sendOp(ops.setBroadcasting(this.roomId, on));
   }
 
-  setPlaybackPointer(pointer: PlaybackPointer): void {
-    this.doc.transact(() => this.writePointer(pointer));
+  setPaused(isPaused: boolean): void {
+    this.#sendOp(ops.setPaused(this.roomId, isPaused));
   }
 
-  private writePointer(pointer: PlaybackPointer): void {
-    this.playback.set("itemId", pointer.itemId);
-    this.playback.set("ownerId", pointer.ownerId);
-    this.playback.set("uri", pointer.uri);
-    this.playback.set("startedAtEpochMs", pointer.startedAtEpochMs);
-    this.playback.set("isPaused", pointer.isPaused);
-    this.playback.set("pausedAtOffsetMs", pointer.pausedAtOffsetMs);
+  seekTo(positionMs: number): void {
+    this.#sendOp(ops.seek(this.roomId, positionMs));
   }
 
-  setPaused(isPaused: boolean, nowEpochMs: number = Date.now()): void {
-    const current = this.getPlaybackPointer();
-    const next = isPaused
-      ? pausedPointer(current, nowEpochMs)
-      : resumedPointer(current, nowEpochMs);
-    this.setPlaybackPointer(next);
-  }
-
-  /** Moves the whole room to a position in the item that is already playing. */
-  seekTo(positionMs: number, nowEpochMs: number = Date.now()): void {
-    const current = this.getPlaybackPointer();
-    if (current.itemId === null) return;
-    this.setPlaybackPointer(seekedPointer(current, positionMs, nowEpochMs));
+  skip(): void {
+    this.#sendOp(ops.skip(this.roomId));
   }
 
   /**
-   * Pops the projection head and points playback at it. Clears playback when
-   * nothing is queued. `positionMs` says how far into the new track the player
-   * already is, for the case where Spotify transitioned on its own.
+   * Record where the local player is, and tell the server.
+   *
+   * The sample is kept locally because the progress bar needs it; the op goes
+   * out because the protocol defines it, even though the server treats it as
+   * advisory and keeps nothing.
    */
-  advance(nowEpochMs: number = Date.now(), positionMs = 0): void {
-    this.doc.transact(() => {
-      const head = this.sessionQueue()[0];
-      if (!head) {
-        if (this.getPlaybackPointer().itemId !== null) this.writePointer(NULL_POINTER);
-        return;
-      }
-      this.popFromQueue(head.ownerId, head.item.id);
-      this.writePointer(startedPointer(head, nowEpochMs, positionMs));
-    });
+  setMyProgress(progress: Progress | null): void {
+    this.#myProgress = progress;
+    if (progress === null) return;
+    this.#sendOp(ops.reportProgress(this.roomId, progress.positionMs));
   }
 
-  /** Skipping is just advancing early. */
-  skip(nowEpochMs: number = Date.now()): void {
-    this.advance(nowEpochMs);
-  }
+  // --- teardown ------------------------------------------------------
 
   destroy(): void {
-    for (const unsubscribe of this.unsubscribes) unsubscribe();
-    this.unsubscribes.length = 0;
-    this.statusListeners.clear();
-    this.changeListeners.clear();
-    this.provider.destroy();
-    this.doc.destroy();
+    this.#closed = true;
+    this.#generation += 1;
+    if (this.#reconnectHandle !== null) {
+      this.#clearTimer(this.#reconnectHandle);
+      this.#reconnectHandle = null;
+    }
+    const socket = this.#socket;
+    this.#socket = null;
+    if (socket !== null) {
+      socket.onopen = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.onmessage = null;
+      try {
+        socket.close();
+      } catch {
+        // Already gone. Nothing to release.
+      }
+    }
+    this.#statusListeners.clear();
+    this.#changeListeners.clear();
   }
 }
 
-/**
- * Turns parsed track links into queue items. Each gets a fresh id, so the same
- * track can sit in a queue more than once and still be addressed individually.
- */
-export function toQueueItems(tracks: ParsedTrack[], addedBy: string): QueueItem[] {
-  return tracks.map((track) => ({
-    id: crypto.randomUUID(),
-    uri: track.uri,
-    trackId: track.trackId,
-    addedBy,
-  }));
-}
-
-function indexOfItem(array: Y.Array<QueueItem>, itemId: string): number {
-  return array.toArray().findIndex((item) => item.id === itemId);
-}
-
-function clamp(value: number, low: number, high: number): number {
-  return Math.min(high, Math.max(low, value));
-}
-
-/** Awareness carries whatever a peer wrote; accept only well-formed progress. */
-function readProgress(raw: unknown): Progress | null {
-  if (!raw || typeof raw !== "object") return null;
-  const value = raw as Record<string, unknown>;
-  if (typeof value.itemId !== "string") return null;
-  if (typeof value.positionMs !== "number") return null;
-  if (typeof value.durationMs !== "number") return null;
-  if (typeof value.sampledAtEpochMs !== "number") return null;
-  return {
-    itemId: value.itemId,
-    positionMs: value.positionMs,
-    durationMs: value.durationMs,
-    sampledAtEpochMs: value.sampledAtEpochMs,
-  };
-}
-
-function readUsername(state: Record<string, unknown>): string {
-  const name = state.username;
-  return typeof name === "string" && name.trim() ? name : "anonymous";
-}
+/** The name the app uses. `Room` kept its meaning; only the transport changed. */
+export { RoomClient as Room };

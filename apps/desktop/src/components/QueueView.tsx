@@ -21,16 +21,8 @@ import { Sidebar, type Selection } from "./Sidebar";
 import { useRoomSnapshot } from "./use-room-snapshot";
 import styles from "./QueueView.module.css";
 
-export function QueueView({
-  room,
-  roomId,
-  username,
-}: {
-  room: Room;
-  roomId: string;
-  username: string;
-}) {
-  const { status, participants, sessionQueue, pointer, leaderProgress, myQueue, queueOf } =
+export function QueueView({ room, roomId }: { room: Room; roomId: string }) {
+  const { status, participants, sessionQueue, pointer, myProgress, myQueue, queueOf, error } =
     useRoomSnapshot(room);
   const playlistsApi = usePlaylists();
   const [selection, setSelection] = useState<Selection>("session");
@@ -38,35 +30,36 @@ export function QueueView({
   const now = useNowTicker(pointer.itemId !== null);
 
   const { createWithTracks } = playlistsApi;
+  const myPubkey = room.myPubkey;
 
   // An imported playlist becomes a new local playlist and takes over the view.
   const onImported = useCallback(
     (name: string, tracks: ParsedTrack[]) => {
       const id = createWithTracks(name, tracks);
-      setSelection(room.myUserId);
+      setSelection(myPubkey);
       setPane(id);
     },
-    [createWithTracks, room.myUserId],
+    [createWithTracks, myPubkey],
   );
 
   const { importStatus, startImports } = usePlaylistImport(onImported);
 
   const broadcasting = room.isBroadcasting();
-  const ownerName = ownerNameOf(participants, pointer.ownerId);
-  const currentItem = currentItemOf(pointer, ownerName);
-  const progress = displayedProgress(pointer, leaderProgress, now);
+  const ownerName = nameOf(participants, pointer.ownerPubkey);
+  const currentItem = currentItemOf(pointer);
+  const progress = displayedProgress(pointer, myProgress, now);
 
   const queueSource = queueSourceOf(selection, {
-    myUserId: room.myUserId,
+    myPubkey,
     sessionQueue,
     myQueue,
     queueOf,
     broadcasting,
-    ownerNameFor: (userId) => nameOf(participants, userId),
+    ownerNameFor: (pubkey) => nameOf(participants, pubkey),
   });
 
   function appendTracks(tracks: ParsedTrack[]) {
-    room.appendToMyQueue(toQueueItems(tracks, username));
+    room.appendToMyQueue(toQueueItems(tracks));
   }
 
   /**
@@ -90,15 +83,20 @@ export function QueueView({
           <div className={styles.roomCode}>{roomId}</div>
           <BroadcastToggle
             broadcasting={broadcasting}
-            onToggle={() => room.setBroadcasting(!room.isBroadcasting())}
+            onToggle={() => room.setBroadcasting(!broadcasting)}
           />
         </div>
       </header>
 
+      {/* A rejected message is worth a line of its own: a skewed clock looks
+          exactly like a dead room otherwise. */}
+      {error && <p className={styles.errorBanner}>{error.humanMessage}</p>}
+
       <div className={styles.body}>
         <Sidebar
           participants={participants}
-          playingOwnerId={pointer.ownerId}
+          myPubkey={myPubkey}
+          playingOwnerPubkey={pointer.ownerPubkey}
           selection={selection}
           onSelect={(next) => {
             setSelection(next);
@@ -137,7 +135,7 @@ export function QueueView({
               selected={pane}
               onSelect={setPane}
               onAddToQueue={appendTracks}
-              onReplaceQueue={(tracks) => room.replaceMyQueue(toQueueItems(tracks, username))}
+              onReplaceQueue={(tracks) => room.replaceMyQueue(toQueueItems(tracks))}
               onQueueLinks={(links) => handleLinks(links, appendTracks)}
               onLinks={handleLinks}
               onMove={(from, to) => room.moveInMyQueue(from, to)}
@@ -158,18 +156,18 @@ export function QueueView({
 function queueSourceOf(
   selection: Selection,
   room: {
-    myUserId: string;
+    myPubkey: string;
     sessionQueue: SessionEntry[];
     myQueue: QueueItem[];
-    queueOf: (userId: string) => QueueItem[];
+    queueOf: (pubkey: string) => QueueItem[];
     broadcasting: boolean;
-    ownerNameFor: (userId: string) => string;
+    ownerNameFor: (pubkey: string) => string;
   },
 ): QueueSource {
   if (selection === "session") {
     return { kind: "session", entries: room.sessionQueue };
   }
-  if (selection === room.myUserId) {
+  if (selection === room.myPubkey) {
     return { kind: "mine", items: room.myQueue, isBroadcasting: room.broadcasting };
   }
   return {
@@ -179,8 +177,9 @@ function queueSourceOf(
   };
 }
 
-function nameOf(participants: Participant[], userId: string): string {
-  return participants.find((p) => p.userId === userId)?.username ?? "someone";
+function nameOf(participants: Participant[], pubkey: string | null): string {
+  if (!pubkey) return "someone";
+  return participants.find((p) => p.pubkey === pubkey)?.username ?? "someone";
 }
 
 const STATUS_LINGER_MS = 4000;
@@ -247,19 +246,13 @@ function useNowTicker(active: boolean): number {
 }
 
 /** The playing track lives in the pointer, not in any queue — rebuild a card-shaped view of it. */
-function currentItemOf(pointer: PlaybackPointer, ownerName: string): QueueItem | null {
+function currentItemOf(pointer: PlaybackPointer): QueueItem | null {
   if (!pointer.itemId || !pointer.uri) return null;
   return {
     id: pointer.itemId,
     uri: pointer.uri,
     trackId: pointer.uri.replace("spotify:track:", ""),
-    addedBy: ownerName,
   };
-}
-
-function ownerNameOf(participants: Participant[], ownerId: string | null): string {
-  if (!ownerId) return "someone";
-  return participants.find((p) => p.userId === ownerId)?.username ?? "someone";
 }
 
 function statusClass(status: ConnectionStatus): string {

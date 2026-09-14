@@ -1,6 +1,5 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type { PlaybackPointer, Room } from "./room";
-import { isResponsibleForAdvancing } from "./election";
 import { positionMs } from "./playback-clock";
 
 const POLL_INTERVAL_MS = 2000;
@@ -52,12 +51,16 @@ function sameClock(a: Clock | null, b: Clock): boolean {
 }
 
 /**
- * Wires a joined Room to the local Spotify client: plays whatever the shared
- * playback pointer names, seeks to the position the shared clock implies,
- * mirrors pause/resume, and — on the one elected peer — advances the session
- * queue when the local track ends or when nothing is playing. Pure glue: the
- * state lives in `room`, the clock in `playback-clock`, who-advances in
- * `election`.
+ * Wires a joined room to the local Spotify client: plays whatever the shared
+ * playback pointer names, seeks to the position the shared clock implies, and
+ * mirrors pause/resume. Pure glue: the state lives on the server, the clock in
+ * `playback-clock`.
+ *
+ * Advancing is not this class's job. The server owns the pointer and moves it
+ * on its own, so where this driver used to elect a peer and call `advance()`,
+ * it now does nothing and waits for the next snapshot. Detecting the end of a
+ * track still matters — it is what makes the local player stop chasing a track
+ * the room has finished — but the decision to move on is the server's.
  */
 export class SyncDriver {
   private lastAppliedItemId: string | null = null;
@@ -71,7 +74,7 @@ export class SyncDriver {
   private lastAppliedPaused: boolean | null = null;
   /** The pointer clock the local player was last placed on, for remote-seek detection. */
   private lastAppliedClock: Clock | null = null;
-  /** Fires shortly after the pointer's track runs out, if Spotify did not move on by itself. */
+  /** Fires shortly after the pointer's track runs out, so the poll loop settles. */
   private endTimer: ReturnType<typeof setTimeout> | null = null;
   /** The item the pending end timer was scheduled for. */
   private endTimerItemId: string | null = null;
@@ -259,13 +262,12 @@ export class SyncDriver {
     await this.tryInvoke("spotify_seek", { positionMs: positionMs(pointer, now) });
   }
 
-  /** The heartbeat: corrects drift, detects track end, and restarts a stalled room. */
+  /** The heartbeat: corrects drift and reports where the local player sits. */
   private async poll(now = Date.now()): Promise<void> {
     const pointer = this.room.getPlaybackPointer();
 
     if (pointer.itemId === null) {
       this.room.setMyProgress(null);
-      if (this.room.sessionQueue().length > 0 && this.isElected()) this.room.advance();
       return;
     }
     if (pointer.isPaused) return;
@@ -273,8 +275,10 @@ export class SyncDriver {
     const state = await this.tryInvoke<PlayerState>("spotify_get_state");
     if (!state) return;
 
-    if (this.isElected() && this.transitionedToNext(state, pointer)) {
-      this.room.advance(now, state.positionMs);
+    // Spotify moved into the track we queued behind this one. The server will
+    // move the pointer; we only stop treating the old item as current.
+    if (this.transitionedToNext(state, pointer)) {
+      this.clearEndTimer();
       return;
     }
 
@@ -297,12 +301,12 @@ export class SyncDriver {
 
     const playedLongEnough = now - pointer.startedAtEpochMs > TRACK_END_GRACE_MS;
     if (playedLongEnough && this.looksFinished(state, pointer.uri)) {
-      if (this.isElected()) this.room.advance();
+      this.clearEndTimer();
       return;
     }
 
-    if (this.isElected() && this.ranPastDuration(state, pointer, now)) {
-      this.room.advance();
+    if (this.ranPastDuration(state, pointer, now)) {
+      this.clearEndTimer();
       return;
     }
 
@@ -316,9 +320,9 @@ export class SyncDriver {
 
   /**
    * Aims a single timer just past the instant the shared clock reaches the
-   * track's length. Spotify's own transition into the queued track normally
-   * advances the room first; this is the fallback for when it does not. A seek
-   * moves `endsAt`, so the timer is replaced.
+   * track's length. The server advances the room; this only stops the driver
+   * from holding a finished item as current. A seek moves `endsAt`, so the
+   * timer is replaced.
    */
   private scheduleEndTimer(pointer: PlaybackPointer, endsAtEpochMs: number, now: number): void {
     if (this.endTimerItemId === pointer.itemId && this.endTimerAtEpochMs === endsAtEpochMs) return;
@@ -334,13 +338,15 @@ export class SyncDriver {
     }, Math.max(0, endsAtEpochMs - now));
   }
 
-  /** The scheduled end arrived: advance, unless the room moved on or paused meanwhile. */
+  /**
+   * The scheduled end arrived. There is nothing to do but stop reporting
+   * progress for an item that has run out: the server owns what plays next.
+   */
   private onTrackEnded(itemId: string | null): void {
     const pointer = this.room.getPlaybackPointer();
     if (pointer.itemId !== itemId) return;
     if (pointer.isPaused) return;
-    if (!this.isElected()) return;
-    this.room.advance();
+    this.room.setMyProgress(null);
   }
 
   private clearEndTimer(): void {
@@ -388,16 +394,13 @@ export class SyncDriver {
 
   /**
    * The shared clock has run past the track's own length. Spotify sometimes
-   * stops reporting a track end at all — this backstop ends the item anyway.
+   * stops reporting a track end at all — this backstop treats the item as over
+   * anyway, so the driver stops correcting drift against a finished track.
    */
   private ranPastDuration(state: PlayerState, pointer: PlaybackPointer, now: number): boolean {
     if (state.durationMs <= 0) return false;
     if (state.trackUri !== pointer.uri) return false;
     return now - pointer.startedAtEpochMs > state.durationMs + DURATION_OVERRUN_MS;
-  }
-
-  private isElected(): boolean {
-    return isResponsibleForAdvancing(this.room.doc.clientID, this.room.connectedClientIds());
   }
 
   /** Spotify commands are best-effort; a failure is logged once, never thrown at the room. */
