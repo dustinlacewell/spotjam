@@ -1,0 +1,16 @@
+{
+  "name": "spotjam",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @spotjam/desktop dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "tauri": "pnpm --filter @spotjam/desktop tauri",
+    "server": "pnpm --filter @spotjam/server dev"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3"
+  }
+}

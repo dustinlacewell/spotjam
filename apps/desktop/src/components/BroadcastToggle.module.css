@@ -1,0 +1,58 @@
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-dim);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.pill:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--accent-dim);
+  color: var(--text);
+}
+
+.pillOn {
+  composes: pill;
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  background: rgba(30, 215, 96, 0.1);
+}
+
+.pillOn:hover {
+  background: rgba(30, 215, 96, 0.16);
+  color: var(--accent);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pillOn .dot {
+  box-shadow: 0 0 0 0 var(--accent-glow);
+  animation: broadcast-pulse 2s infinite;
+}
+
+@keyframes broadcast-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}

@@ -1,0 +1,15 @@
+services:
+  signaling:
+    build:
+      context: .
+    restart: unless-stopped
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      - ./secrets/tunnel-credentials.json:/etc/cloudflared/credentials.json:ro
+    restart: unless-stopped
+    depends_on:
+      - signaling

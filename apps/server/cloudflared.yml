@@ -1,0 +1,9 @@
+tunnel: 8f0fa989-7aa2-4015-8d0c-8b08730e8f5e
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: yjs.ldlework.com
+    service: http://signaling:4444
+  - hostname: peering.ldlework.com
+    service: http://signaling:4444
+  - service: http_status:404

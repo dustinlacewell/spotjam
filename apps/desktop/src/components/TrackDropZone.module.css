@@ -1,0 +1,17 @@
+.zone {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px dashed transparent;
+  border-radius: var(--radius-md);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.zoneOver {
+  composes: zone;
+  border-color: var(--accent-dim);
+  background: rgba(30, 215, 96, 0.07);
+}

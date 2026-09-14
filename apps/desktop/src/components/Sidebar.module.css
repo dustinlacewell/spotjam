@@ -1,0 +1,96 @@
+.sidebar {
+  flex-shrink: 0;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-2);
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+  overflow-y: auto;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.divider {
+  height: 1px;
+  margin: var(--space-2) var(--space-2);
+  background: var(--border-soft);
+}
+
+.row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.row:hover {
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+.rowSelected {
+  composes: row;
+  background: var(--bg-card-hover);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.iconSlot {
+  flex-shrink: 0;
+  width: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.broadcastDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playingGlyph {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.youTag {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-card);
+}

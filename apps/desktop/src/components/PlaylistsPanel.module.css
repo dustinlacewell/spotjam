@@ -1,0 +1,249 @@
+.panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+}
+
+/* ---- left column: the queue, then the playlists ---- */
+
+.listColumn {
+  width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.playlists {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 8px var(--space-3);
+  background: var(--bg-card);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.row:hover {
+  background: var(--bg-card-hover);
+  color: var(--text);
+}
+
+.rowSelected {
+  composes: row;
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.rowSelected:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* The count and delete glyph ride the accent fill, not the dark row. */
+.rowSelected .rowCount,
+.rowSelected .rowAction {
+  color: var(--bg);
+  opacity: 1;
+}
+
+.rowSelected .rowRemove:hover {
+  color: var(--danger);
+}
+
+.rowName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowCount {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.rowAction {
+  flex-shrink: 0;
+  width: 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 0;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease;
+}
+
+.rowRemove {
+  composes: rowAction;
+}
+
+/* Holds the delete button's width on rows that have none, so every count lines up. */
+.actionSpacer {
+  flex-shrink: 0;
+  width: 16px;
+}
+
+.row:hover .rowAction,
+.rowSelected .rowAction {
+  opacity: 1;
+}
+
+.rowAction:hover {
+  color: var(--text);
+}
+
+.rowRemove:hover {
+  color: var(--danger);
+}
+
+.renameInput {
+  width: 100%;
+  padding: 8px var(--space-3);
+  background: var(--bg-card);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.newButton {
+  flex-shrink: 0;
+  padding: 8px var(--space-3);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 600;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.newButton:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+/* ---- right column: the selected playlist's tracks ---- */
+
+.tracksColumn {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tracksHeader {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.tracksActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.pillAction {
+  padding: 5px var(--space-3);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.pillAction:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.pillAction:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.clearAction {
+  composes: pillAction;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.clearAction:hover {
+  color: var(--danger);
+  border-color: transparent;
+  background: rgba(224, 69, 90, 0.12);
+}
+
+.tracksScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-1);
+}
+
+.trackList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.empty {
+  color: var(--text-faint);
+  font-size: 13px;
+  text-align: center;
+  margin-top: var(--space-6);
+}
+
+/* Transient line while a playlist import is in flight, or its failure. */
+.status {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
+}

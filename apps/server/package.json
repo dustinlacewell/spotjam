@@ -1,0 +1,23 @@
+{
+  "name": "@spotjam/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/main.ts",
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch src/main.ts",
+    "start": "node --experimental-strip-types src/main.ts",
+    "build": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@spotjam/protocol": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.0"
+  }
+}
