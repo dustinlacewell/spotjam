@@ -22,6 +22,21 @@ export interface SessionEntry {
   ownerName: string;
 }
 
+/**
+ * The newest playback sample from whoever is broadcasting the current track.
+ *
+ * The pointer says where playback started; this says where it actually is.
+ * They drift apart whenever the broadcaster's player stutters, buffers or is
+ * scrubbed outside the app, and this is the half that tracks reality.
+ */
+export interface Progress {
+  itemId: string;
+  positionMs: number;
+  durationMs: number;
+  /** Reporter's clock when sampled. Extrapolate forward from here. */
+  sampledAtEpochMs: number;
+}
+
 /** What is playing, decided by the server. */
 export interface PlaybackPointer {
   itemId: string | null;
@@ -52,6 +67,11 @@ export interface RoomSnapshot {
   /** The caller's own queue, in their order. */
   myQueue: QueueItem[];
   pointer: PlaybackPointer;
+  /**
+   * The current broadcaster's newest sample, or null when nobody has reported
+   * one for the track the pointer names. Every client renders the same bar.
+   */
+  progress: Progress | null;
   /** Server clock at snapshot time, for drift correction. */
   serverTime: number;
 }

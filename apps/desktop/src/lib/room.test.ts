@@ -123,6 +123,7 @@ function snapshot(overrides: Partial<RoomSnapshot> = {}): RoomSnapshot {
     sessionQueue: [],
     myQueue: [],
     pointer: NULL_POINTER,
+    progress: null,
     serverTime: EPOCH,
     ...overrides,
   };
@@ -310,6 +311,15 @@ describe("RoomClient ops", () => {
   it("reports progress to the server and keeps the sample for the local bar", async () => {
     const { room, latest } = await connected();
 
+    // The sample only means anything while the room is playing that track.
+    latest().deliver({
+      type: "room-state",
+      snapshot: snapshot({
+        pointer: { ...NULL_POINTER, itemId: "i1", uri: "spotify:track:x" },
+      }),
+    });
+    await settle();
+
     room.setMyProgress({
       itemId: "i1",
       positionMs: 5000,
@@ -321,7 +331,10 @@ describe("RoomClient ops", () => {
     expect(latest().payloads()[0]).toEqual({
       type: "report-progress",
       roomId: ROOM,
+      itemId: "i1",
       positionMs: 5000,
+      durationMs: 200_000,
+      sampledAtEpochMs: EPOCH,
     });
     expect(room.myProgress()?.positionMs).toBe(5000);
     room.destroy();
@@ -335,6 +348,73 @@ describe("RoomClient ops", () => {
 
     expect(room.myProgress()).toBeNull();
     expect(latest().sent).toHaveLength(0);
+    room.destroy();
+  });
+
+  it("prefers the broadcaster's sample over its own", async () => {
+    const { room, latest } = await connected();
+    const pointer = { ...NULL_POINTER, itemId: "i1", uri: "spotify:track:x" };
+
+    // A listener's own player is silent, so its sample is meaningless here.
+    room.setMyProgress({
+      itemId: "i1",
+      positionMs: 1000,
+      durationMs: 200_000,
+      sampledAtEpochMs: EPOCH,
+    });
+    latest().deliver({
+      type: "room-state",
+      snapshot: snapshot({
+        pointer,
+        progress: {
+          itemId: "i1",
+          positionMs: 90_000,
+          durationMs: 200_000,
+          sampledAtEpochMs: EPOCH,
+        },
+      }),
+    });
+    await settle();
+
+    expect(room.myProgress()?.positionMs).toBe(90_000);
+    room.destroy();
+  });
+
+  it("falls back to its own sample until the server echoes one", async () => {
+    const { room, latest } = await connected();
+    const pointer = { ...NULL_POINTER, itemId: "i1", uri: "spotify:track:x" };
+
+    latest().deliver({ type: "room-state", snapshot: snapshot({ pointer }) });
+    room.setMyProgress({
+      itemId: "i1",
+      positionMs: 1000,
+      durationMs: 200_000,
+      sampledAtEpochMs: EPOCH,
+    });
+    await settle();
+
+    expect(room.myProgress()?.positionMs).toBe(1000);
+    room.destroy();
+  });
+
+  it("ignores a local sample left over from the previous track", async () => {
+    const { room, latest } = await connected();
+
+    room.setMyProgress({
+      itemId: "i1",
+      positionMs: 1000,
+      durationMs: 200_000,
+      sampledAtEpochMs: EPOCH,
+    });
+    latest().deliver({
+      type: "room-state",
+      snapshot: snapshot({
+        pointer: { ...NULL_POINTER, itemId: "i2", uri: "spotify:track:y" },
+      }),
+    });
+    await settle();
+
+    expect(room.myProgress()).toBeNull();
     room.destroy();
   });
 });

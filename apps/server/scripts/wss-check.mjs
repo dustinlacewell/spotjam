@@ -2,8 +2,12 @@
 //   node --experimental-strip-types --import ./src/register-hook.ts \
 //     scripts/wss-check.mjs [wss://host]
 //
-// Registers a throwaway identity, joins a room, and asserts a snapshot comes
-// back. Lives inside apps/server so @spotjam/protocol resolves.
+// Walks the whole path a client walks: register, join, broadcast, play a
+// track, report a position, and see that position come back in a snapshot.
+// The last step is the point -- it is the half that makes playback shared
+// rather than each client guessing at its own bar.
+//
+// Lives inside apps/server so @spotjam/protocol resolves.
 
 import WebSocket from "ws";
 import { generateKeypair, seal } from "@spotjam/protocol";
@@ -12,9 +16,16 @@ const url = process.argv[2] ?? "wss://yjs.ldlework.com";
 const identity = generateKeypair();
 const username = `smoke${Date.now().toString().slice(-6)}`;
 const roomId = `smoke-${Date.now().toString().slice(-6)}`;
+const TRACK = { id: "t1", uri: "spotify:track:t1", trackId: "t1" };
+const REPORTED_POSITION_MS = 42_000;
 
 const socket = new WebSocket(url);
 const seen = [];
+let stage = "greeting";
+
+function send(payload) {
+  socket.send(JSON.stringify(seal(payload, identity)));
+}
 
 function finish(code, message) {
   console.log(message);
@@ -27,14 +38,14 @@ function finish(code, message) {
 }
 
 const timer = setTimeout(
-  () => finish(1, `TIMEOUT after 20s; saw: ${JSON.stringify(seen)}`),
+  () => finish(1, `TIMEOUT after 20s at stage "${stage}"; saw: ${JSON.stringify(seen)}`),
   20_000,
 );
 timer.unref?.();
 
 socket.on("open", () => {
   console.log(`socket open: ${url}`);
-  socket.send(JSON.stringify(seal({ type: "register", username }, identity)));
+  send({ type: "register", username });
 });
 
 socket.on("message", (raw) => {
@@ -43,22 +54,51 @@ socket.on("message", (raw) => {
 
   if (event.type === "registered") {
     console.log(`registered as ${event.username}`);
-    socket.send(JSON.stringify(seal({ type: "join-room", roomId }, identity)));
+    stage = "joined";
+    send({ type: "join-room", roomId });
     return;
   }
 
   if (event.type === "room-state") {
-    const { participants, sessionQueue, pointer } = event.snapshot;
-    console.log(
-      `room-state: participants=${participants.length} ` +
-        `sessionQueue=${sessionQueue.length} pointer=${JSON.stringify(pointer.itemId)}`,
-    );
-    finish(0, "WSS ROUND-TRIP: PASS");
+    const { participants, sessionQueue, pointer, progress } = event.snapshot;
+
+    if (stage === "joined") {
+      console.log(
+        `room-state: participants=${participants.length} ` +
+          `sessionQueue=${sessionQueue.length} pointer=${JSON.stringify(pointer.itemId)}`,
+      );
+      stage = "broadcasting";
+      send({ type: "set-broadcasting", roomId, broadcasting: true });
+      send({ type: "enqueue", roomId, items: [TRACK] });
+      send({ type: "skip", roomId });
+      return;
+    }
+
+    if (stage === "broadcasting" && pointer.itemId === TRACK.id) {
+      console.log(`playing: pointer=${pointer.itemId}`);
+      stage = "reported";
+      send({
+        type: "report-progress",
+        roomId,
+        itemId: TRACK.id,
+        positionMs: REPORTED_POSITION_MS,
+        durationMs: 200_000,
+        sampledAtEpochMs: Date.now(),
+      });
+      return;
+    }
+
+    if (stage === "reported") {
+      // Snapshots arrive for every op, so wait for the one carrying the echo.
+      if (progress?.positionMs !== REPORTED_POSITION_MS) return;
+      console.log(`progress relayed: positionMs=${progress.positionMs}`);
+      finish(0, "WSS ROUND-TRIP: PASS");
+    }
     return;
   }
 
   if (event.type === "error") {
-    finish(1, `server error: ${event.code} - ${event.message}`);
+    finish(1, `server error at stage "${stage}": ${event.code} - ${event.message}`);
   }
 });
 

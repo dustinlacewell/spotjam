@@ -323,6 +323,68 @@ describe("transport", () => {
   });
 });
 
+describe("progress", () => {
+  /** A room where Alice is broadcasting and her first track is playing. */
+  function playing(): RoomState {
+    let state = roomWith([ALICE, "alice"], [BOB, "bob"]);
+    state = Room.setBroadcasting(state, ALICE, true);
+    state = Room.enqueue(state, ALICE, [track("a1"), track("a2")]);
+    return Room.advance(state, NOW);
+  }
+
+  function sample(itemId: string, positionMs: number) {
+    return { itemId, positionMs, durationMs: 200_000, sampledAtEpochMs: NOW };
+  }
+
+  it("keeps a sample for the track the pointer names", () => {
+    const state = Room.reportProgress(playing(), ALICE, sample("a1", 12_000));
+    expect(state.members.get(ALICE)?.progress).toEqual(sample("a1", 12_000));
+  });
+
+  it("ignores a sample for any other track", () => {
+    // A sample that arrives just after an advance describes the old track;
+    // keeping it would draw a bar for music nobody is playing.
+    const state = Room.reportProgress(playing(), ALICE, sample("a2", 500));
+    expect(state.members.get(ALICE)?.progress).toBeNull();
+  });
+
+  it("drops every sample when the pointer moves on", () => {
+    let state = Room.reportProgress(playing(), ALICE, sample("a1", 12_000));
+    state = Room.advance(state, NOW + 1000);
+
+    expect(state.pointer.itemId).toBe("a2");
+    expect(state.members.get(ALICE)?.progress).toBeNull();
+  });
+
+  it("drops samples when the last broadcaster stops", () => {
+    let state = Room.reportProgress(playing(), ALICE, sample("a1", 12_000));
+    state = Room.setBroadcasting(state, ALICE, false);
+
+    expect(state.pointer).toEqual(NULL_POINTER);
+    expect(state.members.get(ALICE)?.progress).toBeNull();
+  });
+
+  it("projects the sample of whoever is feeding the current track", () => {
+    const state = Room.reportProgress(playing(), ALICE, sample("a1", 12_000));
+
+    // Bob is a listener: he sees Alice's position, which is what the room hears.
+    expect(Room.projectSnapshot(state, BOB, NOW).progress).toEqual(
+      sample("a1", 12_000),
+    );
+  });
+
+  it("ignores a sample from someone who is not feeding the track", () => {
+    let state = playing();
+    state = Room.reportProgress(state, BOB, sample("a1", 999));
+
+    expect(Room.projectSnapshot(state, ALICE, NOW).progress).toBeNull();
+  });
+
+  it("projects no sample before anyone has reported one", () => {
+    expect(Room.projectSnapshot(playing(), ALICE, NOW).progress).toBeNull();
+  });
+});
+
 describe("projectSnapshot", () => {
   it("gives each recipient their own queue", () => {
     let state = roomWith([ALICE, "alice"], [BOB, "bob"]);

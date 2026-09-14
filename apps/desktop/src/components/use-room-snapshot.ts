@@ -15,7 +15,10 @@ export interface RoomSnapshot {
   participants: Participant[];
   sessionQueue: SessionEntry[];
   pointer: PlaybackPointer;
-  /** This client's own sample; the server keeps no progress. */
+  /**
+   * The current broadcaster's sample, so every client renders the same bar.
+   * Falls back to this client's own sample before the first one arrives.
+   */
   myProgress: Progress | null;
   myQueue: QueueItem[];
   queueOf: (pubkey: string) => QueueItem[];

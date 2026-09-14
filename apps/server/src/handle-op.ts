@@ -84,10 +84,25 @@ export function handleOp(
       return { state: Room.advance(state, ctx.now) };
 
     case "report-progress":
-      // Advisory only. The server owns the pointer and does not move it to
-      // match a client's clock; accepting the op keeps clients from erroring.
-      if (!isFinitePosition(op.positionMs)) return malformed(state);
-      return { state };
+      // The sample never moves the pointer -- the server still owns what plays
+      // and when it started. It is kept so listeners render the broadcaster's
+      // real position instead of extrapolating one of their own.
+      if (
+        !isNonEmptyString(op.itemId) ||
+        !isFinitePosition(op.positionMs) ||
+        !isFinitePosition(op.durationMs) ||
+        !isFinitePosition(op.sampledAtEpochMs)
+      ) {
+        return malformed(state);
+      }
+      return {
+        state: Room.reportProgress(state, pubkey, {
+          itemId: op.itemId,
+          positionMs: op.positionMs,
+          durationMs: op.durationMs,
+          sampledAtEpochMs: op.sampledAtEpochMs,
+        }),
+      };
   }
 }
 

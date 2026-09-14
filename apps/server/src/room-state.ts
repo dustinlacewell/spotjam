@@ -9,6 +9,7 @@ import {
   NULL_POINTER,
   type Participant,
   type PlaybackPointer,
+  type Progress,
   type PublicKeyHex,
   type QueueItem,
   type RoomSnapshot,
@@ -23,6 +24,8 @@ export interface Member {
   username: string;
   broadcasting: boolean;
   queue: QueueItem[];
+  /** Newest playback sample this member reported, if any. */
+  progress: Progress | null;
 }
 
 /**
@@ -64,7 +67,13 @@ export function join(
   if (existing !== undefined) {
     return withMember(state, { ...existing, username });
   }
-  const member: Member = { pubkey, username, broadcasting: false, queue: [] };
+  const member: Member = {
+    pubkey,
+    username,
+    broadcasting: false,
+    queue: [],
+    progress: null,
+  };
   const members = new Map(state.members);
   members.set(pubkey, member);
   return { ...state, members, order: [...state.order, pubkey] };
@@ -203,7 +212,10 @@ export function advance(state: RoomState, now: number): RoomState {
     return { ...state, pointer: NULL_POINTER };
   }
 
-  const advanced = withMember(state, { ...member, queue: member.queue.slice(1) });
+  // Samples describe the outgoing track, so they die with it.
+  const advanced = clearProgress(
+    withMember(state, { ...member, queue: member.queue.slice(1) }),
+  );
   return {
     ...advanced,
     turnCursor: state.turnCursor + 1,
@@ -250,6 +262,24 @@ export function setPaused(state: RoomState, paused: boolean, now: number): RoomS
   };
 }
 
+/**
+ * Record where a member's player actually sits.
+ *
+ * Kept only while it describes the track the pointer names: a sample for
+ * anything else is stale by definition and would render a bar for the wrong
+ * track. Rejecting it here means `projectSnapshot` never has to re-check.
+ */
+export function reportProgress(
+  state: RoomState,
+  pubkey: PublicKeyHex,
+  progress: Progress,
+): RoomState {
+  const member = state.members.get(pubkey);
+  if (member === undefined) return state;
+  if (state.pointer.itemId !== progress.itemId) return state;
+  return withMember(state, { ...member, progress });
+}
+
 export function seek(state: RoomState, positionMs: number, now: number): RoomState {
   const { pointer } = state;
   if (pointer.itemId === null) return state;
@@ -284,8 +314,22 @@ export function projectSnapshot(
     sessionQueue: buildSessionQueue(state),
     myQueue: [...(state.members.get(forPubkey)?.queue ?? [])],
     pointer: state.pointer,
+    progress: currentProgress(state),
     serverTime: now,
   };
+}
+
+/**
+ * The sample belonging to whoever is feeding the current track.
+ *
+ * Only the pointer's owner is playing the audio, so only their sample
+ * describes what the room is hearing.
+ */
+function currentProgress(state: RoomState): Progress | null {
+  const { itemId, ownerPubkey } = state.pointer;
+  if (itemId === null || ownerPubkey === null) return null;
+  const progress = state.members.get(ownerPubkey)?.progress ?? null;
+  return progress !== null && progress.itemId === itemId ? progress : null;
 }
 
 function listParticipants(state: RoomState): Participant[] {
@@ -384,5 +428,14 @@ function isIndexInRange(index: number, length: number): boolean {
 function settlePointer(state: RoomState): RoomState {
   const anyBroadcasting = membersInOrder(state).some((member) => member.broadcasting);
   if (anyBroadcasting || state.pointer.itemId === null) return state;
-  return { ...state, pointer: NULL_POINTER };
+  return clearProgress({ ...state, pointer: NULL_POINTER });
+}
+
+/** Drop every sample. Used whenever the pointer stops naming the same track. */
+function clearProgress(state: RoomState): RoomState {
+  const members = new Map(state.members);
+  for (const [pubkey, member] of members) {
+    if (member.progress !== null) members.set(pubkey, { ...member, progress: null });
+  }
+  return { ...state, members };
 }

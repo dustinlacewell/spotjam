@@ -58,6 +58,7 @@ export {
 export {
   NULL_POINTER,
   type Participant,
+  type Progress,
   type SessionEntry,
   type PlaybackPointer,
   type RoomSnapshot,

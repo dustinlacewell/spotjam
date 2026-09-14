@@ -23,6 +23,7 @@ import {
 const ROOM = "jam";
 const ME = "aa".repeat(32);
 const THEM = "bb".repeat(32);
+const EPOCH = 1_700_000_000_000;
 
 function snapshot(overrides: Partial<RoomSnapshot> = {}): RoomSnapshot {
   return {
@@ -67,10 +68,25 @@ describe("outgoing payloads", () => {
   it("rounds and floors positions, because canonical JSON rejects fractions", () => {
     expect(ops.seek(ROOM, 1234.7)).toEqual({ type: "seek", roomId: ROOM, positionMs: 1235 });
     expect(ops.seek(ROOM, -50)).toEqual({ type: "seek", roomId: ROOM, positionMs: 0 });
-    expect(ops.reportProgress(ROOM, 99.2)).toEqual({
+  });
+
+  it("carries the whole progress sample, not just a position", () => {
+    // Listeners need all four fields: the item to scope the sample, the
+    // duration to size the bar, and the sample time to extrapolate from.
+    expect(
+      ops.reportProgress(ROOM, {
+        itemId: "i1",
+        positionMs: 99,
+        durationMs: 200_000,
+        sampledAtEpochMs: EPOCH,
+      }),
+    ).toEqual({
       type: "report-progress",
       roomId: ROOM,
+      itemId: "i1",
       positionMs: 99,
+      durationMs: 200_000,
+      sampledAtEpochMs: EPOCH,
     });
   });
 

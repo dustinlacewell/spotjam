@@ -83,11 +83,22 @@ export interface SkipOp {
   roomId: string;
 }
 
-/** Report local playback progress so the server can track drift. */
+/**
+ * Report where the local player actually sits.
+ *
+ * This is how a listener's progress bar tracks the broadcaster's real playback
+ * rather than a local guess: the broadcaster samples Spotify, the server keeps
+ * the newest sample, and it rides back out in every snapshot. `itemId` scopes
+ * the sample to one track so a stale one cannot bleed across an advance.
+ */
 export interface ReportProgressOp {
   type: "report-progress";
   roomId: string;
+  itemId: string;
   positionMs: number;
+  durationMs: number;
+  /** Sender's clock when the sample was taken; receivers extrapolate from it. */
+  sampledAtEpochMs: number;
 }
 
 export type Op =

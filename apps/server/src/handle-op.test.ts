@@ -109,7 +109,7 @@ describe("handleOp", () => {
     expect(outcome.state.pointer.itemId).toBe("a1");
   });
 
-  it("accepts report-progress without moving the pointer", () => {
+  it("keeps a progress sample without moving the pointer", () => {
     let state = room();
     state = Room.setBroadcasting(state, ALICE, true);
     state = Room.enqueue(state, ALICE, [track("a1")]);
@@ -118,11 +118,43 @@ describe("handleOp", () => {
     const outcome = handleOp(state, ALICE, {
       type: "report-progress",
       roomId: "jam",
+      itemId: "a1",
       positionMs: 12_345,
+      durationMs: 200_000,
+      sampledAtEpochMs: NOW,
     }, ctx);
 
     expect(outcome.error).toBeUndefined();
+    // The server owns when playback started; a sample never rewrites it.
     expect(outcome.state.pointer).toEqual(state.pointer);
+    expect(outcome.state.members.get(ALICE)?.progress).toEqual({
+      itemId: "a1",
+      positionMs: 12_345,
+      durationMs: 200_000,
+      sampledAtEpochMs: NOW,
+    });
+  });
+
+  it("rejects a progress sample missing its fields", () => {
+    let state = room();
+    state = Room.setBroadcasting(state, ALICE, true);
+    state = Room.enqueue(state, ALICE, [track("a1")]);
+    state = Room.advance(state, NOW);
+
+    for (const bad of [
+      { itemId: "", positionMs: 1, durationMs: 2, sampledAtEpochMs: NOW },
+      { itemId: "a1", positionMs: Number.NaN, durationMs: 2, sampledAtEpochMs: NOW },
+      { itemId: "a1", positionMs: 1, durationMs: Number.NaN, sampledAtEpochMs: NOW },
+      { itemId: "a1", positionMs: 1, durationMs: 2, sampledAtEpochMs: Number.NaN },
+    ]) {
+      const outcome = handleOp(
+        state,
+        ALICE,
+        { type: "report-progress", roomId: "jam", ...bad },
+        ctx,
+      );
+      expect(outcome.error).toBe("malformed");
+    }
   });
 
   it("leaves membership ops to the shell", () => {

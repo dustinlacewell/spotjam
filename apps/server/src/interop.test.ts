@@ -449,6 +449,86 @@ describe("interop — a signed client against a real server", () => {
     expect(expectRoomState(await client.next()).pointer).toEqual(NULL_POINTER);
   });
 
+  it("relays the broadcaster's progress to everyone listening", async () => {
+    const server = await start();
+    const alice = generateKeypair();
+    const bob = generateKeypair();
+    const clientA = await Client.connect(server.port);
+    const clientB = await Client.connect(server.port);
+
+    await registerAs(clientA, alice, "alice");
+    await registerAs(clientB, bob, "bob");
+    await joinRoom(clientA, alice, "jam");
+    await joinRoom(clientB, bob, "jam");
+    await clientA.next();
+
+    clientA.send({ type: "set-broadcasting", roomId: "jam", broadcasting: true }, alice);
+    await clientA.next();
+    await clientB.next();
+    clientA.send({ type: "enqueue", roomId: "jam", items: [track("a1")] }, alice);
+    await clientA.next();
+    await clientB.next();
+    clientA.send({ type: "skip", roomId: "jam" }, alice);
+    const playing = expectRoomState(await clientA.next());
+    await clientB.next();
+    expect(playing.pointer.itemId).toBe("a1");
+    expect(playing.progress).toBeNull();
+
+    // Alice is the one making sound; her sample is what the room is hearing.
+    clientA.send(
+      {
+        type: "report-progress",
+        roomId: "jam",
+        itemId: "a1",
+        positionMs: 42_000,
+        durationMs: 200_000,
+        sampledAtEpochMs: Date.now(),
+      },
+      alice,
+    );
+    await clientA.next();
+
+    const bobsView = expectRoomState(await clientB.next());
+    expect(bobsView.progress).toMatchObject({ itemId: "a1", positionMs: 42_000 });
+  });
+
+  it("drops the relayed progress once the track changes", async () => {
+    const server = await start();
+    const alice = generateKeypair();
+    const client = await Client.connect(server.port);
+
+    await registerAs(client, alice, "alice");
+    await joinRoom(client, alice, "jam");
+    client.send({ type: "set-broadcasting", roomId: "jam", broadcasting: true }, alice);
+    await client.next();
+    client.send(
+      { type: "enqueue", roomId: "jam", items: [track("a1"), track("a2")] },
+      alice,
+    );
+    await client.next();
+    client.send({ type: "skip", roomId: "jam" }, alice);
+    await client.next();
+
+    client.send(
+      {
+        type: "report-progress",
+        roomId: "jam",
+        itemId: "a1",
+        positionMs: 42_000,
+        durationMs: 200_000,
+        sampledAtEpochMs: Date.now(),
+      },
+      alice,
+    );
+    expect(expectRoomState(await client.next()).progress).not.toBeNull();
+
+    // The sample described a1; a2 must not inherit its position.
+    client.send({ type: "skip", roomId: "jam" }, alice);
+    const next = expectRoomState(await client.next());
+    expect(next.pointer.itemId).toBe("a2");
+    expect(next.progress).toBeNull();
+  });
+
   it("clears the pointer when the broadcaster leaves the room", async () => {
     const server = await start();
     const alice = generateKeypair();

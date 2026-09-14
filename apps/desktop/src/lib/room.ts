@@ -33,6 +33,7 @@ import {
   parseServerEvent,
   participantsOf,
   pointerOf,
+  progressOf,
   queueOf,
   reduce,
   registerPayload,
@@ -112,7 +113,10 @@ export class RoomClient {
   #generation = 0;
   /** How far this connection's greeting has got. Reset on every reconnect. */
   #handshake: "greeting" | "registering" | "done" = "greeting";
-  /** Our own sample of the local player. The server keeps no progress. */
+  /**
+   * Our own sample of the local player. Used only until the server echoes a
+   * sample back, which it does whenever this client is the broadcaster.
+   */
   #myProgress: Progress | null = null;
 
   readonly #username: string;
@@ -365,13 +369,18 @@ export class RoomClient {
   }
 
   /**
-   * Our own view of the local player.
+   * Where the current track actually sits.
    *
-   * The server stores no progress, so this never leaves the machine. It feeds
-   * this client's progress bar and nothing else.
+   * The broadcaster's sample, as relayed by the server, so every client draws
+   * the same bar. Our own sample stands in only until the first one arrives --
+   * otherwise the bar would stall for a beat on every track change.
    */
   myProgress(): Progress | null {
-    return this.#myProgress;
+    const shared = progressOf(this.#view);
+    if (shared !== null) return shared;
+    const pointer = this.getPlaybackPointer();
+    if (pointer.itemId === null) return null;
+    return this.#myProgress?.itemId === pointer.itemId ? this.#myProgress : null;
   }
 
   // --- queue ops -----------------------------------------------------
@@ -432,14 +441,13 @@ export class RoomClient {
   /**
    * Record where the local player is, and tell the server.
    *
-   * The sample is kept locally because the progress bar needs it; the op goes
-   * out because the protocol defines it, even though the server treats it as
-   * advisory and keeps nothing.
+   * The sample is kept locally to cover the gap before the server echoes one
+   * back, and sent on so everyone else's bar can track this player.
    */
   setMyProgress(progress: Progress | null): void {
     this.#myProgress = progress;
     if (progress === null) return;
-    this.#sendOp(ops.reportProgress(this.roomId, progress.positionMs));
+    this.#sendOp(ops.reportProgress(this.roomId, progress));
   }
 
   // --- teardown ------------------------------------------------------

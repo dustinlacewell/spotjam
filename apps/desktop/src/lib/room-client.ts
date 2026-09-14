@@ -14,6 +14,7 @@ import {
   type Op,
   type Participant,
   type PlaybackPointer,
+  type Progress,
   type PublicKeyHex,
   type QueueItem,
   type RoomSnapshot,
@@ -33,18 +34,14 @@ export interface ConnectionStatus {
 }
 
 /**
- * One peer's sample of where its local player sits.
+ * Where a player actually sits, as opposed to where the pointer says playback
+ * started. The broadcaster samples its own player, the server keeps the newest
+ * sample, and it rides back out in every snapshot so all clients draw one bar.
  *
- * The server accepts `report-progress` but keeps nothing and puts no progress
- * in a snapshot, so this never round-trips. It stays local to this client and
- * feeds only our own progress bar.
+ * Re-exported from the protocol rather than redeclared: the wire shape is the
+ * only definition, so the two cannot drift.
  */
-export interface Progress {
-  itemId: string;
-  positionMs: number;
-  durationMs: number;
-  sampledAtEpochMs: number;
-}
+export type { Progress };
 
 /**
  * The last snapshot, plus the fields a fresh client has before one arrives.
@@ -120,10 +117,21 @@ export const ops = {
     positionMs: Math.max(0, Math.round(positionMs)),
   }),
   skip: (roomId: string): Op => ({ type: "skip", roomId }),
-  reportProgress: (roomId: string, positionMs: number): Op => ({
+  reportProgress: (
+    roomId: string,
+    sample: {
+      itemId: string;
+      positionMs: number;
+      durationMs: number;
+      sampledAtEpochMs: number;
+    },
+  ): Op => ({
     type: "report-progress",
     roomId,
-    positionMs: Math.max(0, Math.round(positionMs)),
+    itemId: sample.itemId,
+    positionMs: sample.positionMs,
+    durationMs: sample.durationMs,
+    sampledAtEpochMs: sample.sampledAtEpochMs,
   }),
 } as const;
 
@@ -247,6 +255,11 @@ export function myQueueOf(view: RoomView): QueueItem[] {
 
 export function pointerOf(view: RoomView): PlaybackPointer {
   return view.snapshot?.pointer ?? NULL_POINTER;
+}
+
+/** The broadcaster's newest sample, as relayed by the server. */
+export function progressOf(view: RoomView): Progress | null {
+  return view.snapshot?.progress ?? null;
 }
 
 /**
