@@ -13,12 +13,26 @@ export interface ManifestPlatform {
   signature: string;
 }
 
+/**
+ * One installer a person can download.
+ *
+ * The updater's platform URLs are asset-id endpoints that only resolve with an
+ * octet-stream Accept header, so they are useless as links on a page. These
+ * are the browser URLs for the same release.
+ */
+export interface Download {
+  name: string;
+  url: string;
+  size: number;
+}
+
 /** The document served at /latest.json. */
 export interface ReleaseManifest {
   version: string;
   pub_date: string;
   notes: string;
   platforms: Record<string, ManifestPlatform>;
+  downloads: Download[];
 }
 
 /** What one workflow posts: its own platforms, for one version. */
@@ -27,6 +41,7 @@ export interface ManifestUpdate {
   pub_date?: string;
   notes?: string;
   platforms: Record<string, ManifestPlatform>;
+  downloads?: Download[];
 }
 
 /**
@@ -44,6 +59,36 @@ function isPlatform(value: unknown): value is ManifestPlatform {
   return typeof url === "string" && url !== "" && typeof signature === "string" && signature !== "";
 }
 
+/** Where a download may point. The site turns these into links people click. */
+const DOWNLOAD_ORIGIN = "https://github.com/";
+
+function isDownload(value: unknown): value is Download {
+  if (typeof value !== "object" || value === null) return false;
+  const { name, url, size } = value as Record<string, unknown>;
+
+  if (typeof name !== "string" || name === "") return false;
+  if (typeof url !== "string" || !url.startsWith(DOWNLOAD_ORIGIN)) return false;
+  return typeof size === "number" && Number.isInteger(size) && size > 0;
+}
+
+/**
+ * Validate the download list.
+ *
+ * Absent means "this post has nothing to say about downloads"; present but
+ * malformed is refused, so a bad entry cannot become a link on the page.
+ */
+function parseDownloads(value: unknown): Download[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return null;
+
+  const validated: Download[] = [];
+  for (const entry of value) {
+    if (!isDownload(entry)) return null;
+    validated.push({ name: entry.name, url: entry.url, size: entry.size });
+  }
+  return validated;
+}
+
 /**
  * Validate a posted update.
  *
@@ -59,6 +104,9 @@ export function parseUpdate(body: unknown): ManifestUpdate | null {
   if (notes !== undefined && typeof notes !== "string") return null;
   if (typeof platforms !== "object" || platforms === null) return null;
 
+  const downloads = parseDownloads((body as Record<string, unknown>).downloads);
+  if (downloads === null) return null;
+
   const entries = Object.entries(platforms as Record<string, unknown>);
   if (entries.length === 0) return null;
 
@@ -73,6 +121,7 @@ export function parseUpdate(body: unknown): ManifestUpdate | null {
     version,
     ...(pub_date === undefined ? {} : { pub_date }),
     ...(notes === undefined ? {} : { notes }),
+    ...(downloads === undefined ? {} : { downloads }),
     platforms: validated,
   };
 }
@@ -96,6 +145,16 @@ export function mergeManifest(
   const pubDate = update.pub_date ?? new Date(now).toISOString();
   const sameVersion = current !== null && current.version === update.version;
 
+  // Every workflow sees the whole release, so a posted list is already
+  // complete — it replaces rather than merges. Platforms are the opposite:
+  // each job knows only what it built.
+  const downloads =
+    update.downloads !== undefined && update.downloads.length > 0
+      ? update.downloads
+      : sameVersion
+        ? current.downloads
+        : [];
+
   return {
     version: update.version,
     pub_date: pubDate,
@@ -103,5 +162,6 @@ export function mergeManifest(
     platforms: sameVersion
       ? { ...current.platforms, ...update.platforms }
       : { ...update.platforms },
+    downloads,
   };
 }

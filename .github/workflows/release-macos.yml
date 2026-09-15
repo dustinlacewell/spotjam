@@ -74,10 +74,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release download "${{ inputs.tag || github.ref_name }}" \
-            --pattern latest.json --output latest.json --clobber
+          TAG="${{ inputs.tag || github.ref_name }}"
+          gh release download "$TAG" --pattern latest.json --output latest.json --clobber
+          # The browser URLs for the same release. The updater's own platform
+          # urls are asset-id endpoints, so the site cannot link to them.
+          gh release view "$TAG" --json assets --jq \
+            '[.assets[] | select(.name | test("[.](msi|exe|dmg|AppImage|deb|rpm)$"))
+              | {name: .name, url: .url, size: .size}]' > downloads.json
+          jq --slurpfile d downloads.json '. + {downloads: $d[0]}' latest.json > post.json
           curl --fail-with-body --silent --show-error \
             -X POST https://peering.ldlework.com/latest.json \
             -H "authorization: Bearer $RELEASE_TOKEN" \
             -H "content-type: application/json" \
-            --data-binary @latest.json
+            --data-binary @post.json
