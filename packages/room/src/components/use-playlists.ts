@@ -6,6 +6,7 @@ import {
   deletePlaylist,
   insertTracksIntoPlaylist,
   linkedPlaylistId,
+  moveRowInPlaylist,
   reconcileLinked,
   removeTrackFromPlaylist,
   renamePlaylist,
@@ -13,6 +14,7 @@ import {
   shufflePlaylist,
   unlinkPlaylist,
   type Playlist,
+  type PlaylistRow,
   type PlaylistSource,
 } from "../lib/playlists";
 import { loadPlaylists, savePlaylists } from "../lib/playlists-store";
@@ -24,8 +26,8 @@ export type SyncState = "idle" | "syncing" | "unreachable";
 export interface PlaylistsApi {
   playlists: Playlist[];
   create(name: string): void;
-  /** Creates a playlist already holding tracks, and returns its new id. */
-  createWithTracks(name: string, tracks: ParsedTrack[], source?: PlaylistSource): string;
+  /** Creates a playlist already holding rows, and returns its new id. */
+  createWithTracks(name: string, rows: PlaylistRow[], source?: PlaylistSource): string;
   remove(id: string): void;
   rename(id: string, name: string): void;
   /** Inserts just before `beforeTrackId`, or at the end when null or not found. */
@@ -53,6 +55,13 @@ export interface PlaylistsApi {
    * otherwise the next sync would throw them away.
    */
   addTracks(id: string, tracks: ParsedTrack[]): void;
+  /**
+   * Moves one row to sit before `beforeTrackId`, or to the end when null.
+   *
+   * A linked playlist's order lives in Spotify, so the move is written there
+   * and the playlist syncs. A local one reorders in place.
+   */
+  moveRow(id: string, trackId: string, beforeTrackId: string | null): void;
 }
 
 /**
@@ -123,17 +132,29 @@ export function usePlaylists(service?: PlaylistService): PlaylistsApi {
     [service, apply, setSyncState],
   );
 
+  /**
+   * The playlist as state holds it right now.
+   *
+   * Every write has to consult this rather than a caller's copy: a linked
+   * playlist may have been unlinked, and its rows resynced, since the handler
+   * was wired up.
+   */
+  const currentPlaylist = useCallback((id: string): Playlist | null => {
+    let found: Playlist | null = null;
+    setPlaylists((lists) => {
+      found = lists.find((l) => l.id === id) ?? null;
+      return lists;
+    });
+    return found;
+  }, []);
+
   const addTracks = useCallback(
     (id: string, tracks: ParsedTrack[]) => {
       if (tracks.length === 0) return;
 
-      // Read the link off current state: only Spotify can hold a linked
-      // playlist's tracks, and only the local store can hold a local one's.
-      let playlistId: string | null = null;
-      setPlaylists((lists) => {
-        playlistId = linkedPlaylistId(lists.find((l) => l.id === id) ?? ({} as Playlist)) ?? null;
-        return lists;
-      });
+      const playlist = currentPlaylist(id);
+      if (!playlist) return;
+      const playlistId = linkedPlaylistId(playlist);
 
       if (playlistId === null) {
         apply((l) => insertTracksIntoPlaylist(l, id, tracks, null));
@@ -142,24 +163,76 @@ export function usePlaylists(service?: PlaylistService): PlaylistsApi {
       if (!service) return;
 
       // The write lands in Spotify; the sync brings it back. Syncing rather
-      // than inserting locally keeps Spotify's order and ids authoritative.
+      // than inserting locally keeps Spotify's order and row uids authoritative.
       void service.addTracks(playlistId, tracks).then(
         () => sync(id),
         () => setSyncState(id, "unreachable"),
       );
     },
-    [service, apply, sync, setSyncState],
+    [service, apply, sync, setSyncState, currentPlaylist],
+  );
+
+  const removeTrack = useCallback(
+    (id: string, index: number) => {
+      const playlist = currentPlaylist(id);
+      if (!playlist) return;
+      const playlistId = linkedPlaylistId(playlist);
+
+      if (playlistId === null) {
+        apply((l) => removeTrackFromPlaylist(l, id, index));
+        return;
+      }
+      const row = playlist.rows[index];
+      if (!row || !service) return;
+
+      void service.removeRows(playlistId, [row]).then(
+        () => sync(id),
+        () => setSyncState(id, "unreachable"),
+      );
+    },
+    [service, apply, sync, setSyncState, currentPlaylist],
+  );
+
+  const moveRow = useCallback(
+    (id: string, trackId: string, beforeTrackId: string | null) => {
+      if (trackId === beforeTrackId) return;
+
+      const playlist = currentPlaylist(id);
+      if (!playlist) return;
+      const playlistId = linkedPlaylistId(playlist);
+
+      if (playlistId === null) {
+        apply((l) => moveRowInPlaylist(l, id, trackId, beforeTrackId));
+        return;
+      }
+      if (!service) return;
+
+      const row = playlist.rows.find((r) => r.track.trackId === trackId);
+      if (!row) return;
+
+      // Spotify has no "end" spec for a move — `{before:{type:"end"}}` sends
+      // the row to the front instead — so landing last means naming the row
+      // currently there, which cannot be the one being moved.
+      const target = targetFor(playlist.rows, row, beforeTrackId);
+      if (!target) return;
+
+      void service.moveRow(playlistId, row, target).then(
+        () => sync(id),
+        () => setSyncState(id, "unreachable"),
+      );
+    },
+    [service, apply, sync, setSyncState, currentPlaylist],
   );
 
   return {
     playlists,
     create: useCallback((name: string) => apply((l) => createPlaylist(l, name)), [apply]),
     createWithTracks: useCallback(
-      (name: string, tracks: ParsedTrack[], source?: PlaylistSource) => {
+      (name: string, rows: PlaylistRow[], source?: PlaylistSource) => {
         // The id is minted here, not inside the updater, so the caller can
         // select the new playlist without waiting for state to land.
         const id = crypto.randomUUID();
-        apply((l) => createPlaylistWithTracks(l, name, tracks, id, source));
+        apply((l) => createPlaylistWithTracks(l, name, rows, id, source));
         return id;
       },
       [apply],
@@ -174,10 +247,7 @@ export function usePlaylists(service?: PlaylistService): PlaylistsApi {
         apply((l) => insertTracksIntoPlaylist(l, id, tracks, beforeTrackId)),
       [apply],
     ),
-    removeTrack: useCallback(
-      (id: string, index: number) => apply((l) => removeTrackFromPlaylist(l, id, index)),
-      [apply],
-    ),
+    removeTrack,
     shuffle: useCallback((id: string) => apply((l) => shufflePlaylist(l, id)), [apply]),
     setPublic: useCallback(
       (id: string, isPublic: boolean) => apply((l) => setPlaylistPublic(l, id, isPublic)),
@@ -187,5 +257,27 @@ export function usePlaylists(service?: PlaylistService): PlaylistsApi {
     unlink: useCallback((id: string) => apply((l) => unlinkPlaylist(l, id)), [apply]),
     syncStateOf: useCallback((id: string) => syncStates[id] ?? "idle", [syncStates]),
     addTracks,
+    moveRow,
   };
+}
+
+/**
+ * Which row a moved row should land against.
+ *
+ * Dropping before a named track is expressed directly. Dropping at the end has
+ * to name the row to sit after, and that row must not be the one moving — so a
+ * row already last has nowhere to go.
+ */
+function targetFor(
+  rows: PlaylistRow[],
+  moving: PlaylistRow,
+  beforeTrackId: string | null,
+): { beforeUid: string } | { afterUid: string } | null {
+  if (beforeTrackId !== null) {
+    const before = rows.find((r) => r.track.trackId === beforeTrackId);
+    return before?.uid ? { beforeUid: before.uid } : null;
+  }
+  const others = rows.filter((r) => r.track.trackId !== moving.track.trackId);
+  const last = others[others.length - 1];
+  return last?.uid ? { afterUid: last.uid } : null;
 }

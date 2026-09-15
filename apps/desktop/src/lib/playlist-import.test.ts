@@ -3,6 +3,8 @@ import { PlaylistFetchError } from "@spotjam/room";
 import {
   addTracksToPlaylist,
   importPlaylist,
+  moveRowInPlaylist,
+  removeRowsFromPlaylist,
   type FetchedPlaylist,
   type FetchFailure,
 } from "./playlist-import";
@@ -12,7 +14,7 @@ interface Call {
   args?: Record<string, unknown>;
 }
 
-function fakeInvoke(result: FetchedPlaylist | { throws: unknown }) {
+function fakeInvoke(result: FetchedPlaylist | { throws: unknown } | undefined) {
   const calls: Call[] = [];
   const invoke = async <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
     calls.push({ cmd, args });
@@ -29,9 +31,10 @@ function failing(failure: unknown) {
 const PLAYLIST: FetchedPlaylist = {
   name: "Late night",
   canAdd: true,
+  canEditItems: true,
   tracks: [
-    { uri: "spotify:track:aaaa1111", name: "One", artist: "A" },
-    { uri: "spotify:track:bbbb2222", name: "Two", artist: "B" },
+    { uri: "spotify:track:aaaa1111", name: "One", artist: "A", uid: "row-a" },
+    { uri: "spotify:track:bbbb2222", name: "Two", artist: "B", uid: "row-b" },
   ],
 };
 
@@ -44,26 +47,18 @@ describe("importPlaylist", () => {
     expect(calls).toEqual([{ cmd: "spotify_fetch_playlist", args: { uri: URI } }]);
   });
 
-  it("maps the result to parsed tracks and keeps the name", async () => {
+  it("maps the result to rows and keeps the name", async () => {
     const { invoke } = fakeInvoke(PLAYLIST);
     expect(await importPlaylist(URI, invoke)).toEqual({
       playlistId: "pppp1111",
       name: "Late night",
       canAdd: true,
-      tracks: [
-        { uri: "spotify:track:aaaa1111", trackId: "aaaa1111" },
-        { uri: "spotify:track:bbbb2222", trackId: "bbbb2222" },
+      canEditItems: true,
+      rows: [
+        { track: { uri: "spotify:track:aaaa1111", trackId: "aaaa1111" }, uid: "row-a" },
+        { track: { uri: "spotify:track:bbbb2222", trackId: "bbbb2222" }, uid: "row-b" },
       ],
     });
-  });
-
-  /** Someone else's playlist, and anything that forgot to say. */
-  it("reports a playlist we cannot add to", async () => {
-    const refused = fakeInvoke({ ...PLAYLIST, canAdd: false });
-    expect((await importPlaylist(URI, refused.invoke)).canAdd).toBe(false);
-
-    const silent = fakeInvoke({ name: "Old", tracks: [] });
-    expect((await importPlaylist(URI, silent.invoke)).canAdd).toBe(false);
   });
 
   it("carries the playlist id through, so the playlist can stay linked", async () => {
@@ -73,6 +68,27 @@ describe("importPlaylist", () => {
       invoke,
     );
     expect(imported.playlistId).toBe("qqqq2222");
+  });
+
+  /** Someone else's playlist, and anything that forgot to say. */
+  it("reports the permissions it was given", async () => {
+    const refused = fakeInvoke({ ...PLAYLIST, canAdd: false, canEditItems: false });
+    const one = await importPlaylist(URI, refused.invoke);
+    expect(one.canAdd).toBe(false);
+    expect(one.canEditItems).toBe(false);
+
+    const silent = fakeInvoke({ name: "Old", tracks: [] });
+    const two = await importPlaylist(URI, silent.invoke);
+    expect(two.canAdd).toBe(false);
+    expect(two.canEditItems).toBe(false);
+  });
+
+  it("leaves a row with no uid unaddressable rather than inventing one", async () => {
+    const { invoke } = fakeInvoke({
+      name: "Old",
+      tracks: [{ uri: "spotify:track:aaaa1111", name: "One", artist: "A" }],
+    });
+    expect((await importPlaylist(URI, invoke)).rows[0].uid).toBeUndefined();
   });
 
   it("filters entries whose uri is not a track", async () => {
@@ -86,16 +102,17 @@ describe("importPlaylist", () => {
       ],
     });
     const imported = await importPlaylist(URI, invoke);
-    expect(imported.tracks.map((t) => t.trackId)).toEqual(["cccc3333"]);
+    expect(imported.rows.map((row) => row.track.trackId)).toEqual(["cccc3333"]);
   });
 
-  it("yields an empty track list for an empty playlist", async () => {
-    const { invoke } = fakeInvoke({ name: "Nothing", canAdd: true, tracks: [] });
+  it("yields an empty row list for an empty playlist", async () => {
+    const { invoke } = fakeInvoke({ name: "Nothing", canAdd: true, canEditItems: true, tracks: [] });
     expect(await importPlaylist(URI, invoke)).toEqual({
       playlistId: "pppp1111",
       name: "Nothing",
       canAdd: true,
-      tracks: [],
+      canEditItems: true,
+      rows: [],
     });
   });
 
@@ -151,7 +168,7 @@ const TRACKS = [
 
 describe("addTracksToPlaylist", () => {
   it("sends the playlist uri and the track uris", async () => {
-    const { calls, invoke } = fakeInvoke(undefined as unknown as FetchedPlaylist);
+    const { calls, invoke } = fakeInvoke(undefined);
     await addTracksToPlaylist("pppp1111", TRACKS, invoke);
     expect(calls).toEqual([
       {
@@ -165,7 +182,7 @@ describe("addTracksToPlaylist", () => {
   });
 
   it("does not call the command for an empty track list", async () => {
-    const { calls, invoke } = fakeInvoke(undefined as unknown as FetchedPlaylist);
+    const { calls, invoke } = fakeInvoke(undefined);
     await addTracksToPlaylist("pppp1111", [], invoke);
     expect(calls).toEqual([]);
   });
@@ -182,5 +199,88 @@ describe("addTracksToPlaylist", () => {
     await expect(
       addTracksToPlaylist("pppp1111", TRACKS, failing(new Error("boom"))),
     ).rejects.toBeInstanceOf(PlaylistFetchError);
+  });
+});
+
+describe("removeRowsFromPlaylist", () => {
+  it("sends each row's uid and uri", async () => {
+    const { calls, invoke } = fakeInvoke(undefined);
+    await removeRowsFromPlaylist("pppp1111", [{ track: TRACKS[0], uid: "row-a" }], invoke);
+    expect(calls).toEqual([
+      {
+        cmd: "spotify_remove_from_playlist",
+        args: {
+          uri: "spotify:playlist:pppp1111",
+          rows: [{ uid: "row-a", uri: "spotify:track:aaaa1111" }],
+        },
+      },
+    ]);
+  });
+
+  /** A row Spotify never gave us a uid for has nothing to address. */
+  it("skips rows with no uid, and calls nothing when none are addressable", async () => {
+    const { calls, invoke } = fakeInvoke(undefined);
+    await removeRowsFromPlaylist("pppp1111", [{ track: TRACKS[0] }], invoke);
+    expect(calls).toEqual([]);
+  });
+
+  it("reports a refused write as a typed failure", async () => {
+    const failure: FetchFailure = { kind: "unreachable", message: "cannot remove" };
+    await expect(
+      removeRowsFromPlaylist("pppp1111", [{ track: TRACKS[0], uid: "row-a" }], failing(failure)),
+    ).rejects.toMatchObject({ reason: "unreachable" });
+  });
+});
+
+describe("moveRowInPlaylist", () => {
+  it("sends a before target", async () => {
+    const { calls, invoke } = fakeInvoke(undefined);
+    await moveRowInPlaylist(
+      "pppp1111",
+      { track: TRACKS[0], uid: "row-a" },
+      { beforeUid: "row-b" },
+      invoke,
+    );
+    expect(calls).toEqual([
+      {
+        cmd: "spotify_move_in_playlist",
+        args: {
+          uri: "spotify:playlist:pppp1111",
+          rows: [{ uid: "row-a", uri: "spotify:track:aaaa1111" }],
+          beforeUid: "row-b",
+          afterUid: null,
+        },
+      },
+    ]);
+  });
+
+  /** Landing last names the row to sit after: there is no "end" spec. */
+  it("sends an after target", async () => {
+    const { calls, invoke } = fakeInvoke(undefined);
+    await moveRowInPlaylist(
+      "pppp1111",
+      { track: TRACKS[0], uid: "row-a" },
+      { afterUid: "row-z" },
+      invoke,
+    );
+    expect(calls[0].args).toMatchObject({ beforeUid: null, afterUid: "row-z" });
+  });
+
+  it("does nothing for a row with no uid", async () => {
+    const { calls, invoke } = fakeInvoke(undefined);
+    await moveRowInPlaylist("pppp1111", { track: TRACKS[0] }, { beforeUid: "row-b" }, invoke);
+    expect(calls).toEqual([]);
+  });
+
+  it("reports a refused write as a typed failure", async () => {
+    const failure: FetchFailure = { kind: "unreachable", message: "cannot move" };
+    await expect(
+      moveRowInPlaylist(
+        "pppp1111",
+        { track: TRACKS[0], uid: "row-a" },
+        { beforeUid: "row-b" },
+        failing(failure),
+      ),
+    ).rejects.toMatchObject({ reason: "unreachable" });
   });
 });

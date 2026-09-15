@@ -12,6 +12,7 @@ export type { TrackInfo, TrackMetadataSource } from "./ports/track-metadata";
 export { PlaylistFetchError, isGone } from "./ports/playlist-service";
 export type {
   ImportedPlaylist,
+  MoveTarget,
   PlaylistFetchFailure,
   PlaylistService,
 } from "./ports/playlist-service";
@@ -69,21 +70,25 @@ export type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "./lib/spotify-lin
 
 export {
   canAddTracks,
+  canEditItems,
   createPlaylist,
   createPlaylistWithTracks,
   deletePlaylist,
   insertTracksIntoPlaylist,
   isEditable,
   linkedPlaylistId,
+  moveRowInPlaylist,
   reconcileLinked,
   removeTrackFromPlaylist,
   renamePlaylist,
+  rowsOfTracks,
   setPlaylistPublic,
   shufflePlaylist,
   toSharedPlaylists,
+  tracksOf,
   unlinkPlaylist,
 } from "./lib/playlists";
-export type { Playlist, PlaylistSource } from "./lib/playlists";
+export type { Playlist, PlaylistRow, PlaylistSource } from "./lib/playlists";
 
 // The local copy of a member's queue, so a server restart does not lose it.
 

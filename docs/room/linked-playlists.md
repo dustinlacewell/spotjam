@@ -31,41 +31,53 @@ A stored source is honoured only when it is a well-formed link. Anything else
 loads as local — a playlist that claimed a link it does not have would be
 syncable, and a sync can drop it.
 
-## What a link takes away
+## Rows
 
-`isEditable` is false for a linked playlist, and the UI reads that one
-predicate:
+A playlist holds **rows**, not bare tracks. A `ParsedTrack` says *which
+track*; a row says *this occurrence of it, here*:
 
-- No rename. A sync overwrites the name.
-- No per-track remove, no drop-to-insert.
-- **No shuffle.** It rewrites the stored order, which the next sync throws
-  away.
-- Delete stays. Unlinking or deleting is how you get rid of one.
-- "Add to queue" and "Replace queue" stay. They copy tracks out rather than
-  changing the playlist.
+```ts
+interface PlaylistRow { track: ParsedTrack; uid?: string }
+```
 
-Unlinking keeps the tracks the playlist holds right now and makes it an
-ordinary local playlist.
+The uid is Spotify's identity for that row. `remove` and `move` address rows
+by uid rather than by track uri, so without it neither is possible. A local
+playlist's rows have no uid, and `toSharedPlaylists` never puts one on the
+wire.
 
-## Adding tracks
+A playlist still holds each track once. Dropping a track it already has is
+skipped, and a sync that finds Spotify holding one twice keeps the first row.
 
-The one edit a linked playlist does take is an add, from the track context
-menu — because it does not edit the local copy at all. The tracks are
-appended to the **Spotify playlist**, and the playlist then syncs to pick them
-up. A local insert would only survive until the next sync.
+## Editing a linked playlist
 
-`canAddTracks` decides whether the playlist appears in that menu:
+Edits to a linked playlist are written to **Spotify**, and the playlist syncs
+to pick them up. Nothing is changed locally first: a local edit would only
+survive until the next sync.
 
-- A local playlist always takes tracks.
-- A linked one takes them only when Spotify says we may write.
+What that covers: adding tracks (from the track context menu or the add bar),
+removing a row, and reordering by drag.
 
-A link can point at anyone's playlist, and only its owner may write to one.
-So a linked playlist you do not own is simply absent from "add to playlist" —
-there is no failure to report, because the action is never offered.
+What it does not: **rename**, because Spotify owns the name, and **shuffle**,
+which would be one `move` call per row.
 
-Permission is stored on the source as `canAdd` and restated by every sync:
-access can open up or be withdrawn. A link stored before permission was
-tracked loads as not addable until its first sync.
+Unlinking keeps the tracks and drops the uids — they name rows in a playlist
+this one no longer follows.
+
+## Permission
+
+Spotify tracks two permissions separately, and so does the source:
+
+- `canAdd` — may we add tracks. Gates whether the playlist appears in "add to
+  playlist" at all.
+- `canEditItems` — may we remove and reorder rows. Gates the remove glyph and
+  the reorder drag.
+
+A link can point at anyone's playlist, and only its owner may write to one. A
+playlist you cannot write to simply does not offer the action — there is no
+failure to report, because it is never offered.
+
+Every sync restates both: access can open up or be withdrawn. A link stored
+before a permission was tracked loads without it until its first sync.
 
 ## Sync
 
@@ -106,9 +118,7 @@ is resolved. `getList`/`getListContents` reject every rootlist URI tried
 from a pasted or dropped link. A "pick from your playlists" browser needs a
 new service discovered first.
 
-Removing a track from a linked playlist, and reordering one, are not built.
-`_playlistAPI.remove` and `.move` exist and key on row `uid`s, which
-`fetch_playlist` currently discards.
+Shuffling a linked playlist is not built: it would be one `move` call per row.
 
 `fetch_playlist` drops non-track entries (local files, episodes), so a linked
 playlist can differ from what Spotify shows.

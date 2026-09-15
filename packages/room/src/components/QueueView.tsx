@@ -12,7 +12,7 @@ import type { ConnectionStatus } from "../lib/room-client";
 import type { Room } from "../ports/room";
 import type { ImportedPlaylist } from "../ports/playlist-service";
 import { toQueueItems } from "../lib/room-client";
-import { toSharedPlaylists } from "../lib/playlists";
+import { rowsOfTracks, toSharedPlaylists, type PlaylistRow } from "../lib/playlists";
 import { displayedProgress } from "../lib/progress";
 import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import { useRoomServices } from "../services";
@@ -69,7 +69,9 @@ export function QueueView({
   const copyAsNewPlaylist = useCallback(
     (playlists: ParsedPlaylist[]) => {
       startImports(playlists, (imported) => {
-        openImported(createWithTracks(imported.name, imported.tracks));
+        // A copy is ours: the rows keep the tracks and drop Spotify's row
+        // identities, which name rows in a playlist this one no longer follows.
+        openImported(createWithTracks(imported.name, rowsOfTracks(tracksOfRows(imported.rows))));
       });
     },
     [startImports, createWithTracks, openImported],
@@ -79,11 +81,12 @@ export function QueueView({
     (playlists: ParsedPlaylist[]) => {
       startImports(playlists, (imported) => {
         openImported(
-          createWithTracks(imported.name, imported.tracks, {
+          createWithTracks(imported.name, imported.rows, {
             kind: "spotify",
             playlistId: imported.playlistId,
             syncedAt: Date.now(),
             canAdd: imported.canAdd,
+            canEditItems: imported.canEditItems,
           }),
         );
       });
@@ -139,7 +142,7 @@ export function QueueView({
    * and nothing to ask about.
    */
   function importIntoQueue(playlists: ParsedPlaylist[]) {
-    startImports(playlists, (imported) => appendTracks(imported.tracks));
+    startImports(playlists, (imported) => appendTracks(tracksOfRows(imported.rows)));
   }
 
   /**
@@ -382,6 +385,11 @@ function messageOf(error: unknown): string {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/** The track references out of a fetched playlist's rows. */
+function tracksOfRows(rows: PlaylistRow[]): ParsedTrack[] {
+  return rows.map((row) => row.track);
 }
 
 /** Wall clock, resampled every 500ms, but only while something is playing. */

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ContextMenu, ContextMenuItem, type Point } from "@spotjam/ui";
 import type { PlaylistTrack } from "@spotjam/protocol";
-import { canAddTracks, defaultPlaylistName } from "../lib/playlists";
+import { canAddTracks, defaultPlaylistName, rowsOfTracks } from "../lib/playlists";
 import { filterPlaylists, shouldShowFilter } from "../lib/playlist-filter";
 import { usePlaylistsApi } from "./playlists-context";
 import styles from "./TrackContextMenu.module.css";
@@ -60,7 +60,13 @@ export function TrackContextMenu({
         </ContextMenuItem>
       ))}
       <ContextMenuItem
-        onSelect={() => createWithTracks(defaultPlaylistName(playlists.map((p) => p.name)), tracks)}
+        /* A brand-new playlist is local, so its rows carry no Spotify identity. */
+        onSelect={() =>
+          createWithTracks(
+            defaultPlaylistName(playlists.map((p) => p.name)),
+            rowsOfTracks(tracks),
+          )
+        }
         /* Named against every playlist, not just the addable ones, so a new
            playlist never takes a name already on screen. */
       >

@@ -2,11 +2,11 @@ import { Fragment, useRef, useState } from "react";
 import { ListPlus, ListStart, RefreshCw, Shuffle, Unlink } from "lucide-react";
 import { Button, HintLine, IconButton, TextField } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
-import type { ParsedLinks, ParsedTrack } from "../lib/spotify-link";
-import type { Playlist } from "../lib/playlists";
+import type { ParsedLinks } from "../lib/spotify-link";
+import type { Playlist, PlaylistRow } from "../lib/playlists";
 import type { SyncState } from "./use-playlists";
 import { parseSpotifyLinks } from "../lib/spotify-link";
-import { carriesTracks, linksFromDrop } from "../lib/drop-links";
+import { INTERNAL_DRAG_MIME, carriesTracks, linksFromDrop } from "../lib/drop-links";
 import { tracksOf } from "../lib/selection";
 import { matchesTrack } from "../lib/track-search";
 import { AddTrackBar } from "./AddTrackBar";
@@ -21,13 +21,14 @@ import listStyles from "./QueueLists.module.css";
 
 export function PlaylistTracks({
   playlist,
-  readOnly,
+  canEdit,
   linked = false,
   syncState = "idle",
   onSync,
   onUnlink,
   onLinks,
   onRemoveTrack,
+  onMoveRow,
   onAddToQueue,
   onReplaceQueue,
   onShuffle,
@@ -36,14 +37,15 @@ export function PlaylistTracks({
 }: {
   playlist: Playlist;
   /**
-   * The playlist cannot be edited here: someone else's, or one Spotify owns.
-   * It can still be played — queueing copies tracks out rather than changing
-   * the playlist.
+   * Whether this install may change which rows the playlist holds, and in what
+   * order. False for someone else's, and for a linked playlist Spotify will
+   * not let us write to. Queueing is never gated by it: that copies tracks out
+   * rather than changing the playlist.
    */
-  readOnly: boolean;
+  canEdit: boolean;
   /**
-   * Ours, but mirroring a Spotify playlist. Read-only like a peer's, and
-   * additionally syncable and unlinkable.
+   * Ours, but mirroring a Spotify playlist. Syncable and unlinkable, and every
+   * edit is written to Spotify rather than here.
    */
   linked?: boolean;
   /** How this linked playlist's last sync ended. */
@@ -58,6 +60,8 @@ export function PlaylistTracks({
    */
   onLinks: (links: ParsedLinks, beforeTrackId: string | null) => void;
   onRemoveTrack: (index: number) => void;
+  /** Moves a row to sit before `beforeTrackId`, or to the end when null. */
+  onMoveRow: (trackId: string, beforeTrackId: string | null) => void;
   onAddToQueue: () => void;
   onReplaceQueue: () => void;
   /** Randomizes this playlist's stored order. */
@@ -67,35 +71,62 @@ export function PlaylistTracks({
   importStatus: string | null;
 }) {
   const [query, setQuery] = useState("");
-  // The gap a hovering drag would drop into: an index into visibleTracks
-  // (drop before that track), visibleTracks.length (drop at the end), or
-  // null while no drag is over the list.
+  // The gap a hovering drag would drop into: an index into visibleRows (drop
+  // before that row), visibleRows.length (drop at the end), or null while no
+  // drag is over the list.
   const [overGap, setOverGap] = useState<number | null>(null);
+  // The row being dragged within this list, if any. An external track drag
+  // leaves it null, which is what tells the drop which meaning it has.
+  const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null);
   // dragenter/dragleave fire for every descendant; count them to know when
   // the drag actually left the zone rather than crossed into a child.
   const dragDepth = useRef(0);
-  const isEmpty = playlist.tracks.length === 0;
-  const metadataByUri = useTrackMetadataMap(playlist.tracks.map((t) => t.uri));
-  const rows = playlist.tracks.map(cardItem);
-  const select = useMultiSelect(rows.map((row) => row.id));
+  const isEmpty = playlist.rows.length === 0;
+  const metadataByUri = useTrackMetadataMap(playlist.rows.map((row) => row.track.uri));
+  const cards = playlist.rows.map(cardItem);
+  const select = useMultiSelect(cards.map((card) => card.id));
   const menu = useTrackContextMenu();
   const filtering = query.trim() !== "";
-  const visibleTracks = playlist.tracks
-    .map((track, index) => ({ track, index }))
-    .filter(({ track }) => matchesTrack(query, metadataByUri.get(track.uri), track.trackId));
+  const visibleRows = playlist.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) =>
+      matchesTrack(query, metadataByUri.get(row.track.uri), row.track.trackId),
+    );
 
   function resetDrag() {
     dragDepth.current = 0;
     setOverGap(null);
+    setDraggedTrackId(null);
+  }
+
+  /** The track a drop at `gap` should land before, or null for the end. */
+  function beforeTrackIdAt(gap: number | null): string | null {
+    if (gap === null) return null;
+    return visibleRows[gap]?.row.track.trackId ?? null;
   }
 
   function handleDrop(e: React.DragEvent) {
+    // A row dragged within this list reorders; anything else is an import.
+    if (draggedTrackId !== null) {
+      e.preventDefault();
+      const before = beforeTrackIdAt(overGap);
+      const trackId = draggedTrackId;
+      resetDrag();
+      if (before !== trackId) onMoveRow(trackId, before);
+      return;
+    }
+
     if (!carriesTracks(e.dataTransfer)) return;
     e.preventDefault();
-    const beforeTrackId = overGap === null ? null : (visibleTracks[overGap]?.track.trackId ?? null);
+    const beforeTrackId = beforeTrackIdAt(overGap);
     resetDrag();
     const links = linksFromDrop(e.dataTransfer);
     if (links.tracks.length > 0 || links.playlists.length > 0) onLinks(links, beforeTrackId);
+  }
+
+  /** True while a drag this list can act on is in progress. */
+  function acceptsDrag(e: React.DragEvent): boolean {
+    return draggedTrackId !== null || carriesTracks(e.dataTransfer);
   }
 
   // A linked playlist we could not reach says so in place of its tracks: an
@@ -112,34 +143,50 @@ export function PlaylistTracks({
     <p className={styles.empty}>
       {linked
         ? "This Spotify playlist has no tracks."
-        : readOnly
-          ? "This playlist has no tracks."
-          : "No tracks yet. Paste a link below or drop tracks here."}
+        : canEdit
+          ? "No tracks yet. Paste a link below or drop tracks here."
+          : "This playlist has no tracks."}
     </p>
-  ) : visibleTracks.length === 0 ? (
+  ) : visibleRows.length === 0 ? (
     <p className={styles.empty}>No tracks match "{query}".</p>
   ) : (
     <ul className={styles.trackList}>
       {!filtering && <DropIndicator active={overGap === 0} />}
-      {visibleTracks.map(({ index }, position) => {
-        const row = rows[index]!;
+      {visibleRows.map(({ row, index }, position) => {
+        const card = cards[index]!;
         return (
-        <Fragment key={row.id}>
+        <Fragment key={card.id}>
           <QueueItemCard
-            item={row}
+            item={card}
             isPlaying={false}
             ownerLabel=""
-            isSelected={select.isSelected(row.id)}
-            onClick={(e) => select.onRowClick(e, row.id)}
-            onContextMenu={(e) => menu.open(e, tracksOf(rows, select.contextTargets(row.id)))}
-            onRemove={readOnly ? undefined : () => onRemoveTrack(index)}
+            isSelected={select.isSelected(card.id)}
+            isDragging={draggedTrackId === row.track.trackId}
+            // Reordering a filtered list would move rows the user cannot see.
+            draggable={canEdit && !filtering}
+            onClick={(e) => select.onRowClick(e, card.id)}
+            onContextMenu={(e) => menu.open(e, tracksOf(cards, select.contextTargets(card.id)))}
+            onRemove={canEdit ? () => onRemoveTrack(index) : undefined}
+            onDragStart={
+              canEdit && !filtering
+                ? (e) => {
+                    setDraggedTrackId(row.track.trackId);
+                    e.dataTransfer.effectAllowed = "move";
+                    // Marks the drag as ours so track drop zones ignore it.
+                    e.dataTransfer.setData(INTERNAL_DRAG_MIME, row.track.trackId);
+                    // Firefox refuses to start a drag without payload.
+                    e.dataTransfer.setData("text/plain", row.track.trackId);
+                  }
+                : undefined
+            }
+            onDragEnd={canEdit ? resetDrag : undefined}
             onDragOver={
-              readOnly || filtering
+              !canEdit || filtering
                 ? undefined
                 : (e) => {
-                    if (!carriesTracks(e.dataTransfer)) return;
+                    if (!acceptsDrag(e)) return;
                     e.preventDefault();
-                    e.dataTransfer.dropEffect = "copy";
+                    e.dataTransfer.dropEffect = draggedTrackId === null ? "copy" : "move";
                     const bounds = e.currentTarget.getBoundingClientRect();
                     const isTopHalf = e.clientY < bounds.top + bounds.height / 2;
                     setOverGap(isTopHalf ? position : position + 1);
@@ -166,13 +213,16 @@ export function PlaylistTracks({
           />
         )}
         <div className={styles.tracksActions}>
-          {/* Sharing is ours to decide even when Spotify owns the content. */}
+          {/* Sharing is ours to decide however the content is owned, so this
+              shows for a linked playlist as much as a local one. */}
+          {(linked || canEdit) && (
+            <PublicToggle
+              isPublic={playlist.isPublic}
+              onToggle={() => onSetPublic(!playlist.isPublic)}
+            />
+          )}
           {linked && (
             <>
-              <PublicToggle
-                isPublic={playlist.isPublic}
-                onToggle={() => onSetPublic(!playlist.isPublic)}
-              />
               <IconButton
                 label="Sync from Spotify"
                 shape="square"
@@ -194,25 +244,19 @@ export function PlaylistTracks({
               </IconButton>
             </>
           )}
-          {!readOnly && (
-            <>
-              <PublicToggle
-                isPublic={playlist.isPublic}
-                onToggle={() => onSetPublic(!playlist.isPublic)}
-              />
-              {/* Shuffle rewrites the stored order, which a sync would throw
-                  away — so a linked playlist does not offer it. */}
-              <IconButton
-                label="Shuffle"
-                shape="square"
-                size="md"
-                tone="neutral"
-                disabled={playlist.tracks.length < 2}
-                onClick={onShuffle}
-              >
-                <Shuffle size={16} strokeWidth={2} />
-              </IconButton>
-            </>
+          {/* Shuffle rewrites the whole order at once. On a linked playlist
+              that would be one Spotify call per row, so it stays local-only. */}
+          {!linked && canEdit && (
+            <IconButton
+              label="Shuffle"
+              shape="square"
+              size="md"
+              tone="neutral"
+              disabled={playlist.rows.length < 2}
+              onClick={onShuffle}
+            >
+              <Shuffle size={16} strokeWidth={2} />
+            </IconButton>
           )}
           <IconButton
             label="Add to queue"
@@ -237,22 +281,20 @@ export function PlaylistTracks({
         </div>
       </div>
 
-      {readOnly ? (
-        <div className={styles.tracksScroll}>{body}</div>
-      ) : (
+      {canEdit ? (
         <div
           className={styles.tracksScroll}
           onDragEnter={(e) => {
-            if (!carriesTracks(e.dataTransfer)) return;
+            if (!acceptsDrag(e)) return;
             dragDepth.current += 1;
           }}
           onDragOver={(e) => {
-            if (!carriesTracks(e.dataTransfer)) return;
+            if (!acceptsDrag(e)) return;
             e.preventDefault();
-            e.dataTransfer.dropEffect = "copy";
+            e.dataTransfer.dropEffect = draggedTrackId === null ? "copy" : "move";
           }}
           onDragLeave={(e) => {
-            if (!carriesTracks(e.dataTransfer)) return;
+            if (!acceptsDrag(e)) return;
             dragDepth.current -= 1;
             if (dragDepth.current <= 0) resetDrag();
           }}
@@ -260,11 +302,11 @@ export function PlaylistTracks({
         >
           {body}
         </div>
+      ) : (
+        <div className={styles.tracksScroll}>{body}</div>
       )}
 
-      {readOnly ? (
-        importStatus && <HintLine tone="muted">{importStatus}</HintLine>
-      ) : (
+      {canEdit ? (
         <AddTrackBar
           placeholder="Paste a track or playlist link"
           buttonLabel="Add to playlist"
@@ -278,6 +320,8 @@ export function PlaylistTracks({
             return null;
           }}
         />
+      ) : (
+        importStatus && <HintLine tone="muted">{importStatus}</HintLine>
       )}
 
       <TrackContextMenu at={menu.at} tracks={menu.tracks} onClose={menu.close} />
@@ -285,12 +329,12 @@ export function PlaylistTracks({
   );
 }
 
-/** QueueItemCard renders QueueItems; a playlist track has no queue identity. */
-function cardItem(track: ParsedTrack): QueueItem {
+/** QueueItemCard renders QueueItems; a playlist row has no queue identity. */
+function cardItem(row: PlaylistRow): QueueItem {
   return {
-    id: track.trackId,
-    uri: track.uri,
-    trackId: track.trackId,
+    id: row.track.trackId,
+    uri: row.track.uri,
+    trackId: row.track.trackId,
   };
 }
 

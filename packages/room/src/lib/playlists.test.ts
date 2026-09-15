@@ -2,20 +2,25 @@ import { describe, expect, it } from "vitest";
 import type { ParsedTrack } from "./spotify-link";
 import {
   canAddTracks,
+  canEditItems,
   createPlaylist,
   createPlaylistWithTracks,
   deletePlaylist,
   insertTracksIntoPlaylist,
   isEditable,
   linkedPlaylistId,
+  moveRowInPlaylist,
   reconcileLinked,
   removeTrackFromPlaylist,
   renamePlaylist,
+  rowsOfTracks,
   setPlaylistPublic,
   shufflePlaylist,
   toSharedPlaylists,
+  tracksOf,
   unlinkPlaylist,
   type Playlist,
+  type PlaylistRow,
 } from "./playlists";
 
 const TRACK_A: ParsedTrack = { uri: "spotify:track:aaaa1111", trackId: "aaaa1111" };
@@ -26,66 +31,90 @@ const LOCAL = { kind: "local" } as const;
 
 function lists(): Playlist[] {
   return [
-    { id: "one", name: "Morning", tracks: [TRACK_A], isPublic: false, source: LOCAL },
-    { id: "two", name: "Evening", tracks: [], isPublic: false, source: LOCAL },
+    { id: "one", name: "Morning", rows: rowsOfTracks([TRACK_A]), isPublic: false, source: LOCAL },
+    { id: "two", name: "Evening", rows: [], isPublic: false, source: LOCAL },
   ];
 }
 
 /** A collection whose second playlist mirrors a Spotify playlist. */
-function withLinked(canAdd = true): Playlist[] {
+function withLinked(
+  perms: { canAdd?: boolean; canEditItems?: boolean } = {},
+): Playlist[] {
   return [
     lists()[0],
     {
       id: "linked",
       name: "From Spotify",
-      tracks: [TRACK_A],
+      rows: [{ track: TRACK_A, uid: "row-a" }],
       isPublic: false,
-      source: { kind: "spotify", playlistId: "pppp1111", syncedAt: 1000, canAdd },
+      source: {
+        kind: "spotify",
+        playlistId: "pppp1111",
+        syncedAt: 1000,
+        canAdd: perms.canAdd ?? true,
+        canEditItems: perms.canEditItems ?? true,
+      },
     },
   ];
 }
 
+/** The track ids a playlist holds, in order. */
+function idsOf(playlist: Playlist): string[] {
+  return playlist.rows.map((row) => row.track.trackId);
+}
+
 describe("createPlaylistWithTracks", () => {
-  it("appends a playlist that already holds the tracks", () => {
-    const next = createPlaylistWithTracks(lists(), "Imported", [TRACK_A, TRACK_B], "three");
+  it("appends a playlist that already holds the rows", () => {
+    const next = createPlaylistWithTracks(lists(), "Imported", rowsOfTracks([TRACK_A, TRACK_B]), "three");
     expect(next).toHaveLength(3);
     expect(next[2]).toEqual({
       id: "three",
       name: "Imported",
-      tracks: [TRACK_A, TRACK_B],
+      rows: rowsOfTracks([TRACK_A, TRACK_B]),
       isPublic: false,
       source: LOCAL,
     });
   });
 
   it("creates a linked playlist when given a Spotify source", () => {
-    const source = { kind: "spotify", playlistId: "pppp1111", syncedAt: 50, canAdd: true } as const;
-    const next = createPlaylistWithTracks(lists(), "Linked", [TRACK_A], "three", source);
+    const source = {
+      kind: "spotify",
+      playlistId: "pppp1111",
+      syncedAt: 50,
+      canAdd: true,
+      canEditItems: true,
+    } as const;
+    const next = createPlaylistWithTracks(lists(), "Linked", rowsOfTracks([TRACK_A]), "three", source);
     expect(next[2].source).toEqual(source);
     expect(isEditable(next[2])).toBe(false);
   });
 
+  it("keeps each row's Spotify identity", () => {
+    const rows: PlaylistRow[] = [{ track: TRACK_A, uid: "row-a" }];
+    expect(createPlaylistWithTracks([], "Linked", rows, "x")[0].rows[0].uid).toBe("row-a");
+  });
+
   it("allows a name that already exists", () => {
-    const next = createPlaylistWithTracks(lists(), "Morning", [TRACK_B], "three");
+    const next = createPlaylistWithTracks(lists(), "Morning", rowsOfTracks([TRACK_B]), "three");
     expect(next.filter((l) => l.name === "Morning")).toHaveLength(2);
   });
 
-  it("accepts an empty track list", () => {
-    expect(createPlaylistWithTracks([], "Empty", [], "x")[0].tracks).toEqual([]);
+  it("accepts an empty row list", () => {
+    expect(createPlaylistWithTracks([], "Empty", [], "x")[0].rows).toEqual([]);
   });
 
   it("drops a track listed twice in the import", () => {
-    const next = createPlaylistWithTracks([], "Imported", [TRACK_A, TRACK_B, TRACK_A], "x");
-    expect(next[0].tracks).toEqual([TRACK_A, TRACK_B]);
+    const next = createPlaylistWithTracks([], "Imported", rowsOfTracks([TRACK_A, TRACK_B, TRACK_A]), "x");
+    expect(idsOf(next[0])).toEqual([TRACK_A.trackId, TRACK_B.trackId]);
   });
 
-  it("does not mutate the input lists or the track array", () => {
+  it("does not mutate the input lists or the row array", () => {
     const before = lists();
-    const tracks = [TRACK_A];
-    const next = createPlaylistWithTracks(before, "New", tracks, "three");
+    const rows = rowsOfTracks([TRACK_A]);
+    const next = createPlaylistWithTracks(before, "New", rows, "three");
     expect(before).toHaveLength(2);
-    next[2].tracks.push(TRACK_B);
-    expect(tracks).toEqual([TRACK_A]);
+    next[2].rows.push({ track: TRACK_B });
+    expect(rows).toHaveLength(1);
   });
 });
 
@@ -96,7 +125,7 @@ describe("createPlaylist", () => {
     expect(next[2]).toEqual({
       id: "three",
       name: "Late night",
-      tracks: [],
+      rows: [],
       isPublic: false,
       source: LOCAL,
     });
@@ -123,6 +152,12 @@ describe("createPlaylist", () => {
     const before = lists();
     createPlaylist(before, "New", "three");
     expect(before).toEqual(lists());
+  });
+});
+
+describe("tracksOf", () => {
+  it("drops the row identities, keeping order", () => {
+    expect(tracksOf(withLinked()[1])).toEqual([TRACK_A]);
   });
 });
 
@@ -163,29 +198,37 @@ describe("renamePlaylist", () => {
 describe("insertTracksIntoPlaylist", () => {
   it("appends tracks and skips one the playlist already holds", () => {
     const next = insertTracksIntoPlaylist(lists(), "one", [TRACK_A, TRACK_B], null);
-    expect(next[0].tracks).toEqual([TRACK_A, TRACK_B]);
+    expect(idsOf(next[0])).toEqual([TRACK_A.trackId, TRACK_B.trackId]);
   });
 
-  it("keeps the existing entry, not the incoming one, for a duplicate", () => {
-    const relinked: ParsedTrack = { uri: "https://open.spotify.com/track/aaaa1111", trackId: "aaaa1111" };
+  it("keeps the existing row, not the incoming track, for a duplicate", () => {
+    const relinked: ParsedTrack = {
+      uri: "https://open.spotify.com/track/aaaa1111",
+      trackId: "aaaa1111",
+    };
     const next = insertTracksIntoPlaylist(lists(), "one", [relinked], null);
-    expect(next[0].tracks).toEqual([TRACK_A]);
+    expect(next[0].rows).toEqual(rowsOfTracks([TRACK_A]));
   });
 
   it("lands a track listed twice in one batch once, at its first position", () => {
     const next = insertTracksIntoPlaylist(lists(), "two", [TRACK_B, TRACK_A, TRACK_B], null);
-    expect(next[1].tracks).toEqual([TRACK_B, TRACK_A]);
+    expect(idsOf(next[1])).toEqual([TRACK_B.trackId, TRACK_A.trackId]);
   });
 
   it("inserts before the named track", () => {
     const seeded = insertTracksIntoPlaylist(lists(), "one", [TRACK_C], null);
     const next = insertTracksIntoPlaylist(seeded, "one", [TRACK_B], "cccc3333");
-    expect(next[0].tracks).toEqual([TRACK_A, TRACK_B, TRACK_C]);
+    expect(idsOf(next[0])).toEqual([TRACK_A.trackId, TRACK_B.trackId, TRACK_C.trackId]);
   });
 
   it("appends at the end when beforeTrackId is not found", () => {
     const next = insertTracksIntoPlaylist(lists(), "one", [TRACK_B], "missing");
-    expect(next[0].tracks).toEqual([TRACK_A, TRACK_B]);
+    expect(idsOf(next[0])).toEqual([TRACK_A.trackId, TRACK_B.trackId]);
+  });
+
+  it("gives an inserted track no Spotify identity", () => {
+    const next = insertTracksIntoPlaylist(lists(), "one", [TRACK_B], null);
+    expect(next[0].rows[1].uid).toBeUndefined();
   });
 
   it("is a no-op for an empty track list, an unknown id, or when nothing new arrives", () => {
@@ -199,22 +242,82 @@ describe("insertTracksIntoPlaylist", () => {
     const before = lists();
     const next = insertTracksIntoPlaylist(before, "one", [TRACK_B], null);
     expect(next[1]).toBe(before[1]);
-    expect(before[0].tracks).toEqual([TRACK_A]);
+    expect(idsOf(before[0])).toEqual([TRACK_A.trackId]);
+  });
+});
+
+describe("moveRowInPlaylist", () => {
+  function three(): Playlist[] {
+    return [
+      {
+        id: "one",
+        name: "Morning",
+        rows: rowsOfTracks([TRACK_A, TRACK_B, TRACK_C]),
+        isPublic: false,
+        source: LOCAL,
+      },
+    ];
+  }
+
+  it("moves a row before the named track", () => {
+    const next = moveRowInPlaylist(three(), "one", TRACK_C.trackId, TRACK_A.trackId);
+    expect(idsOf(next[0])).toEqual([TRACK_C.trackId, TRACK_A.trackId, TRACK_B.trackId]);
+  });
+
+  it("moves a row to the end when beforeTrackId is null", () => {
+    const next = moveRowInPlaylist(three(), "one", TRACK_A.trackId, null);
+    expect(idsOf(next[0])).toEqual([TRACK_B.trackId, TRACK_C.trackId, TRACK_A.trackId]);
+  });
+
+  it("moves a row forward past the one it lands before", () => {
+    const next = moveRowInPlaylist(three(), "one", TRACK_A.trackId, TRACK_C.trackId);
+    expect(idsOf(next[0])).toEqual([TRACK_B.trackId, TRACK_A.trackId, TRACK_C.trackId]);
+  });
+
+  it("carries the row's Spotify identity with it", () => {
+    const linked = withLinked();
+    const seeded = insertTracksIntoPlaylist(linked, "linked", [TRACK_B], null);
+    const next = moveRowInPlaylist(seeded, "linked", TRACK_A.trackId, null);
+    expect(next[1].rows[1].uid).toBe("row-a");
+  });
+
+  it("is a no-op when the row is already there", () => {
+    const before = three();
+    expect(moveRowInPlaylist(before, "one", TRACK_C.trackId, null)[0]).toBe(before[0]);
+    expect(moveRowInPlaylist(before, "one", TRACK_A.trackId, TRACK_B.trackId)[0]).toBe(before[0]);
+  });
+
+  it("is a no-op for an unknown row, an unknown playlist, or a move onto itself", () => {
+    const before = three();
+    expect(moveRowInPlaylist(before, "one", "missing", null)[0]).toBe(before[0]);
+    expect(moveRowInPlaylist(before, "missing", TRACK_A.trackId, null)).toEqual(three());
+    expect(moveRowInPlaylist(before, "one", TRACK_A.trackId, TRACK_A.trackId)).toBe(before);
+  });
+
+  it("treats an unknown destination as the end", () => {
+    const next = moveRowInPlaylist(three(), "one", TRACK_A.trackId, "missing");
+    expect(idsOf(next[0])).toEqual([TRACK_B.trackId, TRACK_C.trackId, TRACK_A.trackId]);
+  });
+
+  it("never mutates", () => {
+    const before = three();
+    moveRowInPlaylist(before, "one", TRACK_C.trackId, TRACK_A.trackId);
+    expect(idsOf(before[0])).toEqual([TRACK_A.trackId, TRACK_B.trackId, TRACK_C.trackId]);
   });
 });
 
 describe("removeTrackFromPlaylist", () => {
-  it("removes the track at the index", () => {
+  it("removes the row at the index", () => {
     const seeded = insertTracksIntoPlaylist(lists(), "one", [TRACK_B], null);
     const next = removeTrackFromPlaylist(seeded, "one", 0);
-    expect(next[0].tracks).toEqual([TRACK_B]);
+    expect(idsOf(next[0])).toEqual([TRACK_B.trackId]);
   });
 
   it("ignores an out-of-range index and never mutates", () => {
     const before = lists();
     expect(removeTrackFromPlaylist(before, "one", 5)).toEqual(lists());
     expect(removeTrackFromPlaylist(before, "one", -1)).toEqual(lists());
-    expect(before[0].tracks).toEqual([TRACK_A]);
+    expect(idsOf(before[0])).toEqual([TRACK_A.trackId]);
   });
 
   it("ignores an unknown playlist id", () => {
@@ -227,8 +330,8 @@ describe("shufflePlaylist", () => {
     const before = lists();
     const seeded = insertTracksIntoPlaylist(before, "one", [TRACK_B], null);
     const next = shufflePlaylist(seeded, "one");
-    expect([...next[0].tracks].sort(byId)).toEqual([TRACK_A, TRACK_B].sort(byId));
-    expect(before[0].tracks).toEqual([TRACK_A]);
+    expect([...idsOf(next[0])].sort()).toEqual([TRACK_A.trackId, TRACK_B.trackId].sort());
+    expect(idsOf(before[0])).toEqual([TRACK_A.trackId]);
   });
 
   it("leaves other playlists alone", () => {
@@ -236,7 +339,7 @@ describe("shufflePlaylist", () => {
     expect(next[1]).toEqual(lists()[1]);
   });
 
-  it("is a no-op below two tracks or for an unknown id", () => {
+  it("is a no-op below two rows or for an unknown id", () => {
     expect(shufflePlaylist(lists(), "one")).toEqual(lists());
     expect(shufflePlaylist(lists(), "two")).toEqual(lists());
     expect(shufflePlaylist(lists(), "missing")).toEqual(lists());
@@ -306,48 +409,61 @@ describe("canAddTracks", () => {
 
   /** A link can point at anyone's playlist; only its owner may write. */
   it("follows the link's permission for a linked playlist", () => {
-    expect(canAddTracks(withLinked(true)[1])).toBe(true);
-    expect(canAddTracks(withLinked(false)[1])).toBe(false);
+    expect(canAddTracks(withLinked({ canAdd: true })[1])).toBe(true);
+    expect(canAddTracks(withLinked({ canAdd: false })[1])).toBe(false);
+  });
+});
+
+describe("canEditItems", () => {
+  it("is true for a local playlist", () => {
+    expect(canEditItems(lists()[0])).toBe(true);
+  });
+
+  /** Spotify tracks this apart from adding, so the two can disagree. */
+  it("follows the link's own permission, not the add one", () => {
+    expect(canEditItems(withLinked({ canAdd: true, canEditItems: false })[1])).toBe(false);
+    expect(canEditItems(withLinked({ canAdd: false, canEditItems: true })[1])).toBe(true);
   });
 });
 
 describe("reconcileLinked", () => {
-  const fetched = { name: "Renamed in Spotify", tracks: [TRACK_B, TRACK_C], canAdd: true };
+  const fetched = {
+    name: "Renamed in Spotify",
+    rows: [
+      { track: TRACK_B, uid: "row-b" },
+      { track: TRACK_C, uid: "row-c" },
+    ],
+    canAdd: true,
+    canEditItems: true,
+  };
 
-  it("replaces name and tracks and stamps the sync time", () => {
+  it("replaces name and rows and stamps the sync time", () => {
     const next = reconcileLinked(withLinked(), "linked", fetched, 2000);
     expect(next[1].name).toBe("Renamed in Spotify");
-    expect(next[1].tracks).toEqual([TRACK_B, TRACK_C]);
+    expect(next[1].rows).toEqual(fetched.rows);
     expect(next[1].source).toEqual({
       kind: "spotify",
       playlistId: "pppp1111",
       syncedAt: 2000,
       canAdd: true,
+      canEditItems: true,
     });
   });
 
-  /** Access can open up or be withdrawn, so each sync restates it. */
-  it("restates the add permission from the fetch", () => {
-    const opened = reconcileLinked(withLinked(false), "linked", fetched, 2000);
-    expect(canAddTracks(opened[1])).toBe(true);
-
-    const closed = reconcileLinked(withLinked(true), "linked", { ...fetched, canAdd: false }, 2000);
-    expect(canAddTracks(closed[1])).toBe(false);
-  });
-
-  it("treats a fetch with no permission as not addable", () => {
-    const next = reconcileLinked(withLinked(true), "linked", { name: "X", tracks: [] }, 2000);
-    expect(canAddTracks(next[1])).toBe(false);
+  /** Fresh uids are what keep a later remove or move addressing real rows. */
+  it("takes the row identities from the fetch", () => {
+    const next = reconcileLinked(withLinked(), "linked", fetched, 2000);
+    expect(next[1].rows.map((row) => row.uid)).toEqual(["row-b", "row-c"]);
   });
 
   /** Spotify owns the content, so a track removed there is removed here. */
-  it("drops tracks the fetch no longer carries", () => {
-    const next = reconcileLinked(withLinked(), "linked", { name: "Empty", tracks: [] }, 2000);
-    expect(next[1].tracks).toEqual([]);
+  it("drops rows the fetch no longer carries", () => {
+    const next = reconcileLinked(withLinked(), "linked", { name: "Empty", rows: [] }, 2000);
+    expect(next[1].rows).toEqual([]);
   });
 
   it("keeps the current name when the fetch carries none", () => {
-    const next = reconcileLinked(withLinked(), "linked", { name: "   ", tracks: [] }, 2000);
+    const next = reconcileLinked(withLinked(), "linked", { name: "   ", rows: [] }, 2000);
     expect(next[1].name).toBe("From Spotify");
   });
 
@@ -355,15 +471,42 @@ describe("reconcileLinked", () => {
     const next = reconcileLinked(
       withLinked(),
       "linked",
-      { name: "Dupes", tracks: [TRACK_B, TRACK_C, TRACK_B] },
+      { name: "Dupes", rows: [{ track: TRACK_B, uid: "row-b" }, { track: TRACK_B, uid: "row-b2" }] },
       2000,
     );
-    expect(next[1].tracks).toEqual([TRACK_B, TRACK_C]);
+    expect(next[1].rows).toEqual([{ track: TRACK_B, uid: "row-b" }]);
   });
 
   it("keeps the playlist public when it already was", () => {
     const shared = setPlaylistPublic(withLinked(), "linked", true);
     expect(reconcileLinked(shared, "linked", fetched, 2000)[1].isPublic).toBe(true);
+  });
+
+  /** Access can open up or be withdrawn, so each sync restates both flags. */
+  it("restates the permissions from the fetch", () => {
+    const opened = reconcileLinked(
+      withLinked({ canAdd: false, canEditItems: false }),
+      "linked",
+      fetched,
+      2000,
+    );
+    expect(canAddTracks(opened[1])).toBe(true);
+    expect(canEditItems(opened[1])).toBe(true);
+
+    const closed = reconcileLinked(
+      withLinked(),
+      "linked",
+      { ...fetched, canAdd: false, canEditItems: false },
+      2000,
+    );
+    expect(canAddTracks(closed[1])).toBe(false);
+    expect(canEditItems(closed[1])).toBe(false);
+  });
+
+  it("treats a fetch with no permissions as neither addable nor editable", () => {
+    const next = reconcileLinked(withLinked(), "linked", { name: "X", rows: [] }, 2000);
+    expect(canAddTracks(next[1])).toBe(false);
+    expect(canEditItems(next[1])).toBe(false);
   });
 
   /**
@@ -379,7 +522,7 @@ describe("reconcileLinked", () => {
     const before = withLinked();
     const next = reconcileLinked(before, "linked", fetched, 2000);
     expect(next[0]).toBe(before[0]);
-    expect(before[1].tracks).toEqual([TRACK_A]);
+    expect(idsOf(before[1])).toEqual([TRACK_A.trackId]);
     expect(before[1].name).toBe("From Spotify");
   });
 });
@@ -387,9 +530,14 @@ describe("reconcileLinked", () => {
 describe("unlinkPlaylist", () => {
   it("keeps the tracks and makes the playlist editable", () => {
     const next = unlinkPlaylist(withLinked(), "linked");
-    expect(next[1].tracks).toEqual([TRACK_A]);
+    expect(idsOf(next[1])).toEqual([TRACK_A.trackId]);
     expect(next[1].name).toBe("From Spotify");
     expect(isEditable(next[1])).toBe(true);
+  });
+
+  /** The uids name rows in a playlist this one no longer follows. */
+  it("drops the Spotify row identities", () => {
+    expect(unlinkPlaylist(withLinked(), "linked")[1].rows[0].uid).toBeUndefined();
   });
 
   it("returns the same playlist for a local one or an unknown id", () => {
@@ -401,25 +549,27 @@ describe("unlinkPlaylist", () => {
   it("never mutates", () => {
     const before = withLinked();
     unlinkPlaylist(before, "linked");
+    expect(before[1].rows[0].uid).toBe("row-a");
     expect(before[1].source).toEqual({
       kind: "spotify",
       playlistId: "pppp1111",
       syncedAt: 1000,
       canAdd: true,
+      canEditItems: true,
     });
   });
 });
 
 describe("toSharedPlaylists with a linked playlist", () => {
-  /** Peers see an ordinary playlist: the link is install-local state. */
-  it("projects the link away", () => {
+  /** Peers see an ordinary playlist: the link and the uids are local state. */
+  it("projects the link and the row identities away", () => {
     const shared = toSharedPlaylists(setPlaylistPublic(withLinked(), "linked", true));
     expect(shared).toEqual([
-      { id: "linked", name: "From Spotify", tracks: [{ uri: TRACK_A.uri, trackId: TRACK_A.trackId }] },
+      {
+        id: "linked",
+        name: "From Spotify",
+        tracks: [{ uri: TRACK_A.uri, trackId: TRACK_A.trackId }],
+      },
     ]);
   });
 });
-
-function byId(a: ParsedTrack, b: ParsedTrack): number {
-  return a.trackId.localeCompare(b.trackId);
-}

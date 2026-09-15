@@ -6,7 +6,7 @@ mod registry;
 mod track_api;
 
 pub use player_api::PlayerState;
-pub use playlist_api::{PlaylistContents, PlaylistError};
+pub use playlist_api::{PlaylistContents, PlaylistError, RowRef};
 pub use track_api::TrackMetadata;
 
 use cdp::CdpClient;
@@ -198,6 +198,39 @@ pub async fn spotify_add_to_playlist(
     bridge
         .with_client_typed(|client| {
             Box::pin(playlist_api::add_to_playlist(client, uri, track_uris))
+        })
+        .await
+}
+
+/// Removes rows from a Spotify playlist, addressed by their row uids.
+#[tauri::command]
+pub async fn spotify_remove_from_playlist(
+    bridge: tauri::State<'_, SpotifyBridge>,
+    uri: String,
+    rows: Vec<RowRef>,
+) -> Result<(), PlaylistError> {
+    bridge
+        .with_client_typed(|client| Box::pin(playlist_api::remove_from_playlist(client, uri, rows)))
+        .await
+}
+
+/// Moves a row so it sits before or after another row.
+///
+/// Exactly one of `before_uid` / `after_uid` is expected: Spotify has no "end"
+/// spec for a move, so landing last means naming the row currently there.
+#[tauri::command]
+pub async fn spotify_move_in_playlist(
+    bridge: tauri::State<'_, SpotifyBridge>,
+    uri: String,
+    rows: Vec<RowRef>,
+    before_uid: Option<String>,
+    after_uid: Option<String>,
+) -> Result<(), PlaylistError> {
+    bridge
+        .with_client_typed(|client| {
+            Box::pin(playlist_api::move_in_playlist(
+                client, uri, rows, before_uid, after_uid,
+            ))
         })
         .await
 }

@@ -1,4 +1,4 @@
-import type { Playlist, PlaylistSource } from "./playlists";
+import type { Playlist, PlaylistRow, PlaylistSource } from "./playlists";
 
 const STORAGE_KEY = "spotjam.playlists";
 
@@ -13,7 +13,7 @@ export function loadPlaylists(): Playlist[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isPlaylist).map(withPublicFlag).map(withSource);
+    return parsed.filter(isStoredPlaylist).map(toPlaylist);
   } catch {
     return [];
   }
@@ -27,43 +27,89 @@ export function savePlaylists(lists: Playlist[]): void {
   }
 }
 
-function isPlaylist(value: unknown): value is Playlist {
-  const list = value as Partial<Playlist> | null;
+/** What a stored playlist may look like, across every version we have written. */
+interface StoredPlaylist {
+  id: string;
+  name: string;
+  /** Written since rows existed. */
+  rows?: unknown;
+  /** Written before rows existed: bare track references. */
+  tracks?: unknown;
+  isPublic?: unknown;
+  source?: PlaylistSource;
+}
+
+function isStoredPlaylist(value: unknown): value is StoredPlaylist {
+  const list = value as Partial<StoredPlaylist> | null;
   return (
     typeof list?.id === "string" &&
     typeof list.name === "string" &&
-    Array.isArray(list.tracks)
+    (Array.isArray(list.rows) || Array.isArray(list.tracks))
   );
 }
 
-/**
- * Playlists stored before sharing existed carry no flag. They load private:
- * nothing goes to the room until its owner says so.
- */
-function withPublicFlag(list: Playlist): Playlist {
-  return list.isPublic === true ? list : { ...list, isPublic: false };
+function toPlaylist(stored: StoredPlaylist): Playlist {
+  return {
+    id: stored.id,
+    name: stored.name,
+    rows: storedRows(stored),
+    // Playlists stored before sharing existed carry no flag. They load
+    // private: nothing goes to the room until its owner says so.
+    isPublic: stored.isPublic === true,
+    source: storedSource(stored.source),
+  };
 }
 
 /**
- * Playlists stored before linking existed carry no source. They load local,
- * which is what they are: spotjam owns their content.
+ * Rows, from either shape.
  *
+ * Playlists stored before rows existed hold bare tracks, which become rows
+ * with no Spotify identity — correct, because a uid only ever came from a
+ * sync, and the next one restores it.
+ */
+function storedRows(stored: StoredPlaylist): PlaylistRow[] {
+  if (Array.isArray(stored.rows)) {
+    return stored.rows.filter(isRow).map((row) => ({
+      track: { uri: row.track.uri, trackId: row.track.trackId },
+      ...(typeof row.uid === "string" && row.uid.length > 0 ? { uid: row.uid } : {}),
+    }));
+  }
+  const tracks = Array.isArray(stored.tracks) ? stored.tracks : [];
+  return tracks.filter(isTrack).map((track) => ({
+    track: { uri: track.uri, trackId: track.trackId },
+  }));
+}
+
+function isRow(value: unknown): value is { track: { uri: string; trackId: string }; uid?: string } {
+  const row = value as { track?: { uri?: unknown; trackId?: unknown } } | null;
+  return typeof row?.track?.uri === "string" && typeof row.track.trackId === "string";
+}
+
+function isTrack(value: unknown): value is { uri: string; trackId: string } {
+  const track = value as { uri?: unknown; trackId?: unknown } | null;
+  return typeof track?.uri === "string" && typeof track.trackId === "string";
+}
+
+/**
  * A stored source is only honoured when it is a well-formed link. Anything
  * else — a half-written object, a hand-edited store — degrades to local rather
  * than producing a playlist that claims to mirror a playlist id it does not
  * have, which would then be syncable and auto-droppable.
+ *
+ * A link stored before a permission was tracked loads without it: offering a
+ * write Spotify will refuse is the worse mistake, and the next sync restates
+ * both flags anyway.
  */
-function withSource(list: Playlist): Playlist {
-  if (!isLinkedSource(list.source)) return { ...list, source: { kind: "local" } };
-  if (list.source.kind === "spotify" && typeof list.source.canAdd !== "boolean") {
-    // Stored before permission was tracked. Not addable until a sync says
-    // otherwise: offering a write Spotify will refuse is the worse mistake.
-    return { ...list, source: { ...list.source, canAdd: false } };
+function storedSource(source: PlaylistSource | undefined): PlaylistSource {
+  if (source?.kind !== "spotify") return { kind: "local" };
+  if (typeof source.playlistId !== "string" || source.playlistId.length === 0) {
+    return { kind: "local" };
   }
-  return list;
-}
-
-function isLinkedSource(source: PlaylistSource | undefined): boolean {
-  if (source?.kind !== "spotify") return false;
-  return typeof source.playlistId === "string" && source.playlistId.length > 0;
+  return {
+    kind: "spotify",
+    playlistId: source.playlistId,
+    syncedAt: typeof source.syncedAt === "number" ? source.syncedAt : 0,
+    canAdd: source.canAdd === true,
+    canEditItems: source.canEditItems === true,
+  };
 }

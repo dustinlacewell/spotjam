@@ -75,7 +75,7 @@ export function PlaylistList({
                 onDoubleClick={() => isEditable(playlist) && !readOnly && onStartRename(playlist.id)}
               >
                 <span className={styles.rowName}>{playlist.name}</span>
-                <span className={styles.rowCount}>{playlist.tracks.length}</span>
+                <span className={styles.rowCount}>{playlist.rows.length}</span>
                 {!readOnly && (
                   /* The row itself selects on click; the delete glyph must not. */
                   <span

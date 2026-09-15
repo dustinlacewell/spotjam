@@ -46,6 +46,9 @@ pub struct PlaylistContents {
     /// someone else's: a linked playlist can be anyone's, and only the owner
     /// can write to it.
     pub can_add: bool,
+    /// Whether rows may be removed or reordered. Spotify tracks this apart
+    /// from adding, so a playlist can allow one and refuse the other.
+    pub can_edit_items: bool,
     pub tracks: Vec<PlaylistTrack>,
 }
 
@@ -55,6 +58,10 @@ pub struct PlaylistTrack {
     pub uri: String,
     pub name: String,
     pub artist: String,
+    /// Spotify's identity for this row in this playlist. `remove` and `move`
+    /// address rows by uid, not by track uri, so this is what makes either
+    /// possible.
+    pub uid: String,
 }
 
 /// Why a playlist fetch produced nothing.
@@ -165,11 +172,13 @@ async fn fetch_inner(
                             .map((a) => a?.name)
                             .filter((n) => typeof n === "string" && n.length > 0)
                             .join(", "),
+                        uid: item.uid ?? "",
                     }}));
                 return JSON.stringify({{
                     ok: true,
                     name: r?.metadata?.name ?? "",
                     canAdd: r?.metadata?.canAdd === true,
+                    canEditItems: r?.metadata?.canEditItems === true,
                     tracks,
                 }});
             }} catch (e) {{
@@ -205,9 +214,10 @@ fn parse_fetch_result(parsed: &Value) -> std::result::Result<PlaylistContents, P
 
     Ok(PlaylistContents {
         name,
-        // Absent reads as false: offering an add that the client will refuse is
-        // worse than hiding one that would have worked.
+        // Absent reads as false: offering an edit that the client will refuse
+        // is worse than hiding one that would have worked.
         can_add: parsed["canAdd"].as_bool().unwrap_or(false),
+        can_edit_items: parsed["canEditItems"].as_bool().unwrap_or(false),
         tracks,
     })
 }
@@ -292,7 +302,177 @@ fn track_from_json(item: &Value) -> Option<PlaylistTrack> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
+        uid: item
+            .get("uid")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
     })
+}
+
+/// One row of a playlist, as the client addresses it for a write.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowRef {
+    pub uid: String,
+    pub uri: String,
+}
+
+/// Removes rows from a Spotify playlist.
+///
+/// Rows are addressed by `uid`, not by track uri: the uid is what names this
+/// occurrence of the track in this playlist.
+pub async fn remove_from_playlist(
+    cdp: &CdpClient,
+    uri: String,
+    rows: Vec<RowRef>,
+) -> std::result::Result<(), PlaylistError> {
+    match tokio::time::timeout(FETCH_TIMEOUT, remove_inner(cdp, uri, rows)).await {
+        Ok(result) => result,
+        Err(_) => Err(PlaylistError::unreachable(
+            "timed out waiting for Spotify to remove the tracks",
+        )),
+    }
+}
+
+async fn remove_inner(
+    cdp: &CdpClient,
+    uri: String,
+    rows: Vec<RowRef>,
+) -> std::result::Result<(), PlaylistError> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::unreachable)?;
+    ensure_playlist_api(cdp)
+        .await
+        .map_err(PlaylistError::unreachable)?;
+
+    let uri_json = serde_json::to_string(&playlist_uri).map_err(PlaylistError::unreachable)?;
+    let rows_json = rows_to_json(&rows)?;
+
+    let expr = format!(
+        r#"(async () => {{
+            try {{
+                await window.__playlistApi.remove({uri_json}, {rows_json});
+                return JSON.stringify({{ ok: true }});
+            }} catch (e) {{
+                return JSON.stringify({{ ok: false, error: String(e?.message ?? e) }});
+            }}
+        }})()"#
+    );
+
+    run_write(cdp, &expr, "remove failed").await
+}
+
+/// Moves one row so it sits just before `before_uid`, or to the end when that
+/// is `None`.
+///
+/// The two position specs are not symmetric, and the difference matters:
+/// `{before:{type:"end"}}` appends for `add` but sends a moved row to the
+/// *front*. Moving to the end is `{after:{type:"ITEM", uid: <last row>}}`, so
+/// the caller passes the row to land after.
+pub async fn move_in_playlist(
+    cdp: &CdpClient,
+    uri: String,
+    rows: Vec<RowRef>,
+    before_uid: Option<String>,
+    after_uid: Option<String>,
+) -> std::result::Result<(), PlaylistError> {
+    match tokio::time::timeout(
+        FETCH_TIMEOUT,
+        move_inner(cdp, uri, rows, before_uid, after_uid),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(PlaylistError::unreachable(
+            "timed out waiting for Spotify to reorder the playlist",
+        )),
+    }
+}
+
+async fn move_inner(
+    cdp: &CdpClient,
+    uri: String,
+    rows: Vec<RowRef>,
+    before_uid: Option<String>,
+    after_uid: Option<String>,
+) -> std::result::Result<(), PlaylistError> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::unreachable)?;
+    ensure_playlist_api(cdp)
+        .await
+        .map_err(PlaylistError::unreachable)?;
+
+    let uri_json = serde_json::to_string(&playlist_uri).map_err(PlaylistError::unreachable)?;
+    let rows_json = rows_to_json(&rows)?;
+    let position_json = position_spec(before_uid.as_deref(), after_uid.as_deref())?;
+
+    let expr = format!(
+        r#"(async () => {{
+            try {{
+                await window.__playlistApi.move({uri_json}, {rows_json}, {position_json});
+                return JSON.stringify({{ ok: true }});
+            }} catch (e) {{
+                return JSON.stringify({{ ok: false, error: String(e?.message ?? e) }});
+            }}
+        }})()"#
+    );
+
+    run_write(cdp, &expr, "move failed").await
+}
+
+/// The position argument for a move.
+///
+/// Verified against the signed-in client: `{before:{type:"ITEM", uid}}` puts
+/// the row ahead of that one, and `{after:{type:"ITEM", uid}}` behind it.
+/// There is no "end" form that works for a move, so landing at the end means
+/// naming the row currently last.
+fn position_spec(
+    before_uid: Option<&str>,
+    after_uid: Option<&str>,
+) -> std::result::Result<String, PlaylistError> {
+    let value = match (before_uid, after_uid) {
+        (Some(uid), _) => serde_json::json!({ "before": { "type": "ITEM", "uid": uid } }),
+        (None, Some(uid)) => serde_json::json!({ "after": { "type": "ITEM", "uid": uid } }),
+        (None, None) => {
+            return Err(PlaylistError::unreachable(
+                "a move needs a row to land before or after",
+            ))
+        }
+    };
+    serde_json::to_string(&value).map_err(PlaylistError::unreachable)
+}
+
+fn rows_to_json(rows: &[RowRef]) -> std::result::Result<String, PlaylistError> {
+    let pairs: Vec<Value> = rows
+        .iter()
+        .map(|row| serde_json::json!({ "uid": row.uid, "uri": row.uri }))
+        .collect();
+    serde_json::to_string(&pairs).map_err(PlaylistError::unreachable)
+}
+
+/// Runs a write expression and classifies whatever the page reported.
+async fn run_write(
+    cdp: &CdpClient,
+    expr: &str,
+    fallback: &str,
+) -> std::result::Result<(), PlaylistError> {
+    let value: Value = cdp.evaluate(expr).await.map_err(PlaylistError::unreachable)?;
+    let json_str = value.as_str().ok_or_else(|| {
+        PlaylistError::unreachable(format!("write did not return a JSON string: {value}"))
+    })?;
+    let parsed: Value = serde_json::from_str(json_str).map_err(PlaylistError::unreachable)?;
+
+    if parsed["ok"].as_bool() == Some(true) {
+        return Ok(());
+    }
+    Err(classify_js_failure(
+        parsed["error"].as_str().unwrap_or(fallback),
+    ))
 }
 
 /// Accepts `spotify:playlist:ID` or an open.spotify.com playlist URL (with or
@@ -444,6 +624,57 @@ mod tests {
 
         let absent = serde_json::json!({ "ok": true, "name": "Old", "tracks": [] });
         assert!(!parse_fetch_result(&absent).unwrap().can_add);
+    }
+
+    /// Editing rows is tracked apart from adding; both default to refused.
+    #[test]
+    fn reads_the_row_editing_permission() {
+        let allowed = serde_json::json!({
+            "ok": true, "name": "Mine", "canEditItems": true, "tracks": []
+        });
+        assert!(parse_fetch_result(&allowed).unwrap().can_edit_items);
+
+        let absent = serde_json::json!({ "ok": true, "name": "Old", "tracks": [] });
+        assert!(!parse_fetch_result(&absent).unwrap().can_edit_items);
+    }
+
+    #[test]
+    fn carries_each_rows_uid() {
+        let value = serde_json::json!({
+            "ok": true,
+            "name": "Mine",
+            "tracks": [
+                { "uri": "spotify:track:aaaa1111", "name": "One", "artist": "A", "uid": "abc123" },
+            ],
+        });
+        assert_eq!(parse_fetch_result(&value).unwrap().tracks[0].uid, "abc123");
+    }
+
+    /// The two specs are not symmetric — `{before:{type:"end"}}` appends for
+    /// `add` but sends a moved row to the front — so a move always names a row.
+    #[test]
+    fn builds_the_move_position_from_a_named_row() {
+        assert_eq!(
+            position_spec(Some("row1"), None).unwrap(),
+            r#"{"before":{"type":"ITEM","uid":"row1"}}"#
+        );
+        assert_eq!(
+            position_spec(None, Some("row9")).unwrap(),
+            r#"{"after":{"type":"ITEM","uid":"row9"}}"#
+        );
+    }
+
+    #[test]
+    fn before_wins_when_both_are_given() {
+        assert_eq!(
+            position_spec(Some("row1"), Some("row9")).unwrap(),
+            r#"{"before":{"type":"ITEM","uid":"row1"}}"#
+        );
+    }
+
+    #[test]
+    fn a_move_with_no_target_is_refused() {
+        assert!(position_spec(None, None).is_err());
     }
 
     #[test]

@@ -3,7 +3,9 @@ import {
   PlaylistFetchError,
   parseSpotifyPlaylistLink,
   type ImportedPlaylist,
+  type MoveTarget,
   type ParsedTrack,
+  type PlaylistRow,
   type PlaylistService,
 } from "@spotjam/room";
 
@@ -11,10 +13,11 @@ import {
 export interface FetchedPlaylist {
   name: string;
   canAdd?: boolean;
-  tracks: { uri: string; name: string; artist: string }[];
+  canEditItems?: boolean;
+  tracks: { uri: string; name: string; artist: string; uid?: string }[];
 }
 
-/** The tagged failure the Rust command rejects with. */
+/** The tagged failure the Rust commands reject with. */
 export interface FetchFailure {
   kind: "gone" | "unreachable";
   message: string;
@@ -27,9 +30,9 @@ type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 const TRACK_URI_PREFIX = "spotify:track:";
 
 /**
- * Fetches a Spotify playlist through the Rust side and reduces it to the
- * track shape the local playlist store keeps. Entries that are not tracks
- * (local files, episodes) are dropped: we can only queue track URIs.
+ * Fetches a Spotify playlist through the Rust side and reduces it to the rows
+ * the local playlist store keeps. Entries that are not tracks (local files,
+ * episodes) are dropped: we can only queue track URIs.
  *
  * Rejects with a `PlaylistFetchError` carrying Rust's verdict on why: only a
  * `gone` may drop a linked playlist.
@@ -53,10 +56,11 @@ export async function importPlaylist(
   return {
     playlistId,
     name: fetched.name,
-    // Absent reads as "cannot add": offering a write Spotify will refuse is
-    // worse than hiding one that would have worked.
+    // Absent reads as "cannot": offering a write Spotify will refuse is worse
+    // than hiding one that would have worked.
     canAdd: fetched.canAdd === true,
-    tracks: toParsedTracks(fetched.tracks),
+    canEditItems: fetched.canEditItems === true,
+    rows: toRows(fetched.tracks),
   };
 }
 
@@ -83,6 +87,58 @@ export async function addTracksToPlaylist(
 }
 
 /**
+ * Removes rows from the Spotify playlist.
+ *
+ * A row with no uid was never synced, so Spotify has nothing to address; those
+ * are dropped rather than sent as an empty id the client would reject.
+ */
+export async function removeRowsFromPlaylist(
+  playlistId: string,
+  rows: PlaylistRow[],
+  invoke: Invoke = tauriInvoke,
+): Promise<void> {
+  const addressable = toRowRefs(rows);
+  if (addressable.length === 0) return;
+  try {
+    await invoke<void>("spotify_remove_from_playlist", {
+      uri: `spotify:playlist:${playlistId}`,
+      rows: addressable,
+    });
+  } catch (error) {
+    throw toFetchError(error);
+  }
+}
+
+/** Moves one row so it sits before or after another. */
+export async function moveRowInPlaylist(
+  playlistId: string,
+  row: PlaylistRow,
+  target: MoveTarget,
+  invoke: Invoke = tauriInvoke,
+): Promise<void> {
+  const refs = toRowRefs([row]);
+  if (refs.length === 0) return;
+  try {
+    await invoke<void>("spotify_move_in_playlist", {
+      uri: `spotify:playlist:${playlistId}`,
+      rows: refs,
+      beforeUid: "beforeUid" in target ? target.beforeUid : null,
+      afterUid: "afterUid" in target ? target.afterUid : null,
+    });
+  } catch (error) {
+    throw toFetchError(error);
+  }
+}
+
+/** The Tauri-backed adapter the app hands to @spotjam/room. */
+export const tauriPlaylistService: PlaylistService = {
+  import: (uri) => importPlaylist(uri),
+  addTracks: (playlistId, tracks) => addTracksToPlaylist(playlistId, tracks),
+  removeRows: (playlistId, rows) => removeRowsFromPlaylist(playlistId, rows),
+  moveRow: (playlistId, row, target) => moveRowInPlaylist(playlistId, row, target),
+};
+
+/**
  * Reads Rust's tagged failure back into a typed error.
  *
  * A rejection that does not carry the tag never becomes "gone". Anything
@@ -106,19 +162,22 @@ function messageOf(error: unknown): string {
   return String(error);
 }
 
-/** The Tauri-backed adapter the app hands to @spotjam/room. */
-export const tauriPlaylistService: PlaylistService = {
-  import: (uri) => importPlaylist(uri),
-  addTracks: (playlistId, tracks) => addTracksToPlaylist(playlistId, tracks),
-};
-
-function toParsedTracks(entries: FetchedPlaylist["tracks"]): ParsedTrack[] {
-  const tracks: ParsedTrack[] = [];
+function toRows(entries: FetchedPlaylist["tracks"]): PlaylistRow[] {
+  const rows: PlaylistRow[] = [];
   for (const entry of entries) {
     if (!entry.uri.startsWith(TRACK_URI_PREFIX)) continue;
     const trackId = entry.uri.slice(TRACK_URI_PREFIX.length);
     if (!trackId) continue;
-    tracks.push({ uri: entry.uri, trackId });
+    rows.push({
+      track: { uri: entry.uri, trackId },
+      ...(entry.uid ? { uid: entry.uid } : {}),
+    });
   }
-  return tracks;
+  return rows;
+}
+
+function toRowRefs(rows: PlaylistRow[]): { uid: string; uri: string }[] {
+  return rows
+    .filter((row) => typeof row.uid === "string" && row.uid.length > 0)
+    .map((row) => ({ uid: row.uid as string, uri: row.track.uri }));
 }

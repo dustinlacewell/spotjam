@@ -3,7 +3,7 @@ import type { SharedPlaylist } from "@spotjam/protocol";
 import type { Playlist } from "../lib/playlists";
 import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import type { PlaylistsApi } from "./use-playlists";
-import { defaultPlaylistName, isEditable } from "../lib/playlists";
+import { canEditItems, defaultPlaylistName, isEditable, tracksOf } from "../lib/playlists";
 import { PlaylistList } from "./PlaylistList";
 import { PlaylistTracks } from "./PlaylistTracks";
 import { QueueTracks, type QueueSource } from "./QueueTracks";
@@ -69,6 +69,7 @@ export function DetailPane({
     sync,
     unlink,
     syncStateOf,
+    moveRow,
   } = api;
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [pendingName, setPendingName] = useState<string | null>(null);
@@ -82,9 +83,10 @@ export function DetailPane({
   );
   const openPlaylist = visiblePlaylists.find((p) => p.id === selected) ?? null;
 
-  // Someone else's page is read-only whatever the playlist is; on our own page
-  // a linked playlist is read-only too, because Spotify owns its content.
-  const openReadOnly = readOnly || (openPlaylist !== null && !isEditable(openPlaylist));
+  // Someone else's page can only be looked at. On our own, a linked playlist's
+  // rows are editable whenever Spotify lets us write to them: the edit goes
+  // there and comes back on the sync.
+  const canEditOpen = !readOnly && openPlaylist !== null && canEditItems(openPlaylist);
 
   // Opening a linked playlist refreshes it. The fetch is a local call to the
   // running client, so this costs a round trip on this machine and nothing
@@ -140,7 +142,7 @@ export function DetailPane({
       {openPlaylist ? (
         <PlaylistTracks
           playlist={openPlaylist}
-          readOnly={openReadOnly}
+          canEdit={canEditOpen}
           linked={!readOnly && !isEditable(openPlaylist)}
           syncState={syncStateOf(openPlaylist.id)}
           onSync={() => sync(openPlaylist.id)}
@@ -149,8 +151,11 @@ export function DetailPane({
             onLinks(links, (tracks) => insertTracks(openPlaylist.id, tracks, beforeTrackId))
           }
           onRemoveTrack={(index) => removeTrack(openPlaylist.id, index)}
-          onAddToQueue={() => onAddToQueue(openPlaylist.tracks)}
-          onReplaceQueue={() => onReplaceQueue(openPlaylist.tracks)}
+          onMoveRow={(trackId, beforeTrackId) =>
+            moveRow(openPlaylist.id, trackId, beforeTrackId)
+          }
+          onAddToQueue={() => onAddToQueue(tracksOf(openPlaylist))}
+          onReplaceQueue={() => onReplaceQueue(tracksOf(openPlaylist))}
           onShuffle={() => shuffle(openPlaylist.id)}
           onSetPublic={(isPublic) => setPublic(openPlaylist.id, isPublic)}
           importStatus={importStatus}
@@ -181,7 +186,9 @@ function asPlaylist(shared: SharedPlaylist): Playlist {
   return {
     id: shared.id,
     name: shared.name,
-    tracks: shared.tracks.map((track) => ({ uri: track.uri, trackId: track.trackId })),
+    rows: shared.tracks.map((track) => ({
+      track: { uri: track.uri, trackId: track.trackId },
+    })),
     isPublic: true,
     // A peer's playlist is a copy of their tracks. Whether they keep it linked
     // to Spotify is their business and never reaches the wire.

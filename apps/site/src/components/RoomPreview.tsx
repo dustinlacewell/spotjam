@@ -149,6 +149,8 @@ const SERVICES: RoomServices = {
   playlistService: {
     import: () => Promise.reject(new Error("playlist import is off in this preview")),
     addTracks: () => Promise.reject(new Error("playlist editing is off in this preview")),
+    removeRows: () => Promise.reject(new Error("playlist editing is off in this preview")),
+    moveRow: () => Promise.reject(new Error("playlist editing is off in this preview")),
   },
 };
 

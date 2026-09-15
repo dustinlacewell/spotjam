@@ -1,13 +1,29 @@
-import { appendUniqueTracks, type SharedPlaylist } from "@spotjam/protocol";
+import type { SharedPlaylist } from "@spotjam/protocol";
 import type { ParsedTrack } from "./spotify-link";
 import { shuffled } from "./shuffle";
+
+/**
+ * One track's place in one playlist.
+ *
+ * A `ParsedTrack` says *which track*. A row says *this occurrence of it, here*
+ * — which is what Spotify's playlist service removes and reorders, and why it
+ * gives each row a `uid` of its own rather than keying on the track.
+ *
+ * The uid belongs to Spotify's copy, so a local playlist's rows have none, and
+ * `toSharedPlaylists` never puts it on the wire.
+ */
+export interface PlaylistRow {
+  track: ParsedTrack;
+  /** Spotify's identity for this row. Absent for a local playlist. */
+  uid?: string;
+}
 
 /**
  * Where a playlist's content comes from.
  *
  * A local playlist is yours: you add, remove and reorder its tracks. A linked
- * one mirrors a Spotify playlist — Spotify owns the content, spotjam only
- * reads it, and a sync replaces name and tracks wholesale.
+ * one mirrors a Spotify playlist — Spotify owns the content, so edits are
+ * written there and come back on the next sync.
  *
  * This is install-local state. `toSharedPlaylists` projects it away, so a peer
  * sees a linked playlist as an ordinary one.
@@ -23,12 +39,17 @@ export type PlaylistSource =
        * playlist, and only its owner may write.
        */
       canAdd: boolean;
+      /**
+       * Whether Spotify lets us remove and reorder its rows. Separate from
+       * `canAdd`: a playlist can allow one and refuse the other.
+       */
+      canEditItems: boolean;
     };
 
 export interface Playlist {
   id: string;
   name: string;
-  tracks: ParsedTrack[];
+  rows: PlaylistRow[];
   /** Public playlists are visible to everyone else in the room. */
   isPublic: boolean;
   source: PlaylistSource;
@@ -36,12 +57,21 @@ export interface Playlist {
 
 const LOCAL: PlaylistSource = { kind: "local" };
 
+/** The track references a playlist holds, in order. */
+export function tracksOf(playlist: Playlist): ParsedTrack[] {
+  return playlist.rows.map((row) => row.track);
+}
+
+/** Wraps bare tracks as rows with no Spotify identity. */
+export function rowsOfTracks(tracks: ParsedTrack[]): PlaylistRow[] {
+  return tracks.map((track) => ({ track }));
+}
+
 /**
- * Whether this install may change a playlist's name, tracks or order.
+ * Whether a playlist's name may be changed here.
  *
- * False for a linked playlist: Spotify is the authority, and an edit here
- * would only survive until the next sync. Adding its tracks to a queue is
- * still fine — that copies out, it does not mutate the playlist.
+ * False for a linked playlist: Spotify owns the name, and a rename would only
+ * survive until the next sync.
  */
 export function isEditable(playlist: Playlist): boolean {
   return playlist.source.kind === "local";
@@ -63,6 +93,16 @@ export function canAddTracks(playlist: Playlist): boolean {
 }
 
 /**
+ * Whether rows can be removed or reordered.
+ *
+ * Spotify tracks this separately from adding, so a playlist may take new
+ * tracks while refusing to let its existing ones be moved.
+ */
+export function canEditItems(playlist: Playlist): boolean {
+  return playlist.source.kind === "local" ? true : playlist.source.canEditItems;
+}
+
+/**
  * Pure operations over a user's playlist collection. Every function returns a
  * new array and leaves its input untouched, so React state updates stay honest.
  */
@@ -74,7 +114,7 @@ export function createPlaylist(lists: Playlist[], name: string, id?: string): Pl
     {
       id: id ?? crypto.randomUUID(),
       name: trimmed || "Untitled",
-      tracks: [],
+      rows: [],
       isPublic: false,
       source: LOCAL,
     },
@@ -90,31 +130,29 @@ export function createPlaylist(lists: Playlist[], name: string, id?: string): Pl
 export function createPlaylistWithTracks(
   lists: Playlist[],
   name: string,
-  tracks: ParsedTrack[],
+  rows: PlaylistRow[],
   id?: string,
   source: PlaylistSource = LOCAL,
 ): Playlist[] {
   const created = createPlaylist(lists, name, id);
   const fresh = created[created.length - 1];
-  return [
-    ...created.slice(0, -1),
-    { ...fresh, tracks: [...appendUniqueTracks([], tracks)], source },
-  ];
+  return [...created.slice(0, -1), { ...fresh, rows: dedupedRows(rows), source }];
 }
 
 /**
- * Replaces a linked playlist's name and tracks with what Spotify just handed
+ * Replaces a linked playlist's name and rows with what Spotify just handed
  * back, and stamps the sync time.
  *
  * Wholesale replacement is the point: Spotify owns the content, so a track
- * dropped there is dropped here, and the order is theirs. Local playlists and
- * unknown ids are left alone, which is what makes a stale sync landing after
- * an unlink harmless.
+ * dropped there is dropped here, the order is theirs, and the row uids come
+ * back fresh — which is what keeps a later remove or move addressing rows that
+ * still exist. Local playlists and unknown ids are left alone, which is what
+ * makes a stale sync landing after an unlink harmless.
  */
 export function reconcileLinked(
   lists: Playlist[],
   id: string,
-  fetched: { name: string; tracks: ParsedTrack[]; canAdd?: boolean },
+  fetched: { name: string; rows: PlaylistRow[]; canAdd?: boolean; canEditItems?: boolean },
   syncedAt: number,
 ): Playlist[] {
   return mapList(lists, id, (list) => {
@@ -123,13 +161,14 @@ export function reconcileLinked(
     return {
       ...list,
       name,
-      tracks: [...appendUniqueTracks([], fetched.tracks)],
+      rows: dedupedRows(fetched.rows),
       source: {
         ...list.source,
         syncedAt,
         // Permission can change under us — a collaborative playlist opened up,
         // or access withdrawn — so each sync restates it.
         canAdd: fetched.canAdd ?? false,
+        canEditItems: fetched.canEditItems ?? false,
       },
     };
   });
@@ -138,12 +177,14 @@ export function reconcileLinked(
 /**
  * Cuts a playlist's tie to Spotify, keeping the tracks it holds right now.
  *
- * What is left is an ordinary local playlist: editable, and never synced
- * again.
+ * The row uids go with the link: they name rows in Spotify's copy, and this
+ * playlist no longer mirrors it.
  */
 export function unlinkPlaylist(lists: Playlist[], id: string): Playlist[] {
   return mapList(lists, id, (list) =>
-    list.source.kind === "local" ? list : { ...list, source: LOCAL },
+    list.source.kind === "local"
+      ? list
+      : { ...list, source: LOCAL, rows: list.rows.map((row) => ({ track: row.track })) },
   );
 }
 
@@ -168,8 +209,8 @@ export function renamePlaylist(lists: Playlist[], id: string, name: string): Pla
 
 /**
  * Insert tracks just before `beforeTrackId`, or at the end when it is `null`
- * or not found. A track holds each `trackId` once, so a dropped track that
- * duplicates one already in the playlist is skipped rather than moved.
+ * or not found. A playlist holds each `trackId` once, so a dropped track that
+ * duplicates one already there is skipped rather than moved.
  */
 export function insertTracksIntoPlaylist(
   lists: Playlist[],
@@ -179,34 +220,62 @@ export function insertTracksIntoPlaylist(
 ): Playlist[] {
   if (tracks.length === 0) return lists;
   return mapList(lists, id, (list) => {
-    const seen = new Set(list.tracks.map((track) => track.trackId));
-    const fresh: ParsedTrack[] = [];
+    const seen = new Set(list.rows.map((row) => row.track.trackId));
+    const fresh: PlaylistRow[] = [];
     for (const track of tracks) {
       if (seen.has(track.trackId)) continue;
       seen.add(track.trackId);
-      fresh.push(track);
+      fresh.push({ track });
     }
     if (fresh.length === 0) return list;
 
-    const insertAt = list.tracks.findIndex((track) => track.trackId === beforeTrackId);
-    const targetIndex = insertAt < 0 ? list.tracks.length : insertAt;
-    const nextTracks = [...list.tracks];
-    nextTracks.splice(targetIndex, 0, ...fresh);
-    return { ...list, tracks: nextTracks };
+    const insertAt = list.rows.findIndex((row) => row.track.trackId === beforeTrackId);
+    const targetIndex = insertAt < 0 ? list.rows.length : insertAt;
+    const nextRows = [...list.rows];
+    nextRows.splice(targetIndex, 0, ...fresh);
+    return { ...list, rows: nextRows };
   });
 }
 
-/** Randomizes a playlist's stored order. Fewer than two tracks is a no-op. */
+/**
+ * Moves one row to sit before `beforeTrackId`, or to the end when it is null.
+ *
+ * Reordering is by track id rather than index because that is what the drop
+ * target knows, and a row's index shifts as soon as it is lifted out.
+ */
+export function moveRowInPlaylist(
+  lists: Playlist[],
+  id: string,
+  trackId: string,
+  beforeTrackId: string | null,
+): Playlist[] {
+  if (trackId === beforeTrackId) return lists;
+  return mapList(lists, id, (list) => {
+    const from = list.rows.findIndex((row) => row.track.trackId === trackId);
+    if (from < 0) return list;
+
+    const without = list.rows.filter((_, at) => at !== from);
+    const before = without.findIndex((row) => row.track.trackId === beforeTrackId);
+    const targetIndex = before < 0 ? without.length : before;
+    if (targetIndex === from) return list;
+
+    const nextRows = [...without];
+    nextRows.splice(targetIndex, 0, list.rows[from]);
+    return { ...list, rows: nextRows };
+  });
+}
+
+/** Randomizes a playlist's stored order. Fewer than two rows is a no-op. */
 export function shufflePlaylist(lists: Playlist[], id: string): Playlist[] {
   return mapList(lists, id, (list) =>
-    list.tracks.length < 2 ? list : { ...list, tracks: shuffled(list.tracks) },
+    list.rows.length < 2 ? list : { ...list, rows: shuffled(list.rows) },
   );
 }
 
 export function removeTrackFromPlaylist(lists: Playlist[], id: string, index: number): Playlist[] {
   return mapList(lists, id, (list) => {
-    if (index < 0 || index >= list.tracks.length) return list;
-    return { ...list, tracks: list.tracks.filter((_, at) => at !== index) };
+    if (index < 0 || index >= list.rows.length) return list;
+    return { ...list, rows: list.rows.filter((_, at) => at !== index) };
   });
 }
 
@@ -219,7 +288,8 @@ export function setPlaylistPublic(lists: Playlist[], id: string, isPublic: boole
  * The public playlists, in the wire shape the room server holds.
  *
  * Private ones never leave this install, so they are dropped here rather than
- * filtered somewhere downstream.
+ * filtered somewhere downstream. Row uids stay behind too: they name rows in
+ * Spotify's copy and mean nothing to a peer.
  */
 export function toSharedPlaylists(lists: Playlist[]): SharedPlaylist[] {
   return lists
@@ -227,8 +297,20 @@ export function toSharedPlaylists(lists: Playlist[]): SharedPlaylist[] {
     .map((list) => ({
       id: list.id,
       name: list.name,
-      tracks: list.tracks.map((track) => ({ uri: track.uri, trackId: track.trackId })),
+      tracks: list.rows.map((row) => ({ uri: row.track.uri, trackId: row.track.trackId })),
     }));
+}
+
+/** Keeps the first row for each track id, in the order given. */
+function dedupedRows(rows: PlaylistRow[]): PlaylistRow[] {
+  const seen = new Set<string>();
+  const out: PlaylistRow[] = [];
+  for (const row of rows) {
+    if (seen.has(row.track.trackId)) continue;
+    seen.add(row.track.trackId);
+    out.push(row);
+  }
+  return out;
 }
 
 function mapList(
