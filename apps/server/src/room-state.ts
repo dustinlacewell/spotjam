@@ -7,6 +7,7 @@
 
 import {
   NULL_POINTER,
+  appendUniqueTracks,
   type Participant,
   type PlaybackPointer,
   type Progress,
@@ -127,11 +128,11 @@ export function setBroadcasting(
 // ---------------------------------------------------------------------------
 
 /**
- * Append to one member's queue, skipping entries it already holds.
+ * Append to one member's queue, skipping tracks it already holds.
  *
- * Item ids are fresh per add, so a duplicate id means the same entry arriving
- * twice. Clients restore their stored queue to a server that restarted, and
- * two windows on one identity both restore the same entries; the second must
+ * A queue holds each track once, and the entry already in place wins. That
+ * covers a user adding a track twice, and the same stored queue restored
+ * from two windows on one identity after a server restart: the second must
  * land as a no-op rather than as a doubled queue.
  */
 export function enqueue(
@@ -139,16 +140,7 @@ export function enqueue(
   pubkey: PublicKeyHex,
   items: readonly QueueItem[],
 ): RoomState {
-  return mapQueue(state, pubkey, (queue) => {
-    const seen = new Set(queue.map((item) => item.id));
-    const fresh: QueueItem[] = [];
-    for (const item of items) {
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
-      fresh.push(item);
-    }
-    return fresh.length === 0 ? queue : [...queue, ...fresh];
-  });
+  return mapQueue(state, pubkey, (queue) => appendUniqueTracks(queue, items));
 }
 
 export function remove(

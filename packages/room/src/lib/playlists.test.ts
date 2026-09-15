@@ -44,6 +44,11 @@ describe("createPlaylistWithTracks", () => {
     expect(createPlaylistWithTracks([], "Empty", [], "x")[0].tracks).toEqual([]);
   });
 
+  it("drops a track listed twice in the import", () => {
+    const next = createPlaylistWithTracks([], "Imported", [TRACK_A, TRACK_B, TRACK_A], "x");
+    expect(next[0].tracks).toEqual([TRACK_A, TRACK_B]);
+  });
+
   it("does not mutate the input lists or the track array", () => {
     const before = lists();
     const tracks = [TRACK_A];
@@ -116,9 +121,25 @@ describe("renamePlaylist", () => {
 });
 
 describe("addTracksToPlaylist", () => {
-  it("appends tracks and allows duplicates", () => {
+  it("appends tracks and skips one the playlist already holds", () => {
     const next = addTracksToPlaylist(lists(), "one", [TRACK_A, TRACK_B]);
-    expect(next[0].tracks).toEqual([TRACK_A, TRACK_A, TRACK_B]);
+    expect(next[0].tracks).toEqual([TRACK_A, TRACK_B]);
+  });
+
+  it("keeps the existing entry, not the incoming one, for a duplicate", () => {
+    const relinked: ParsedTrack = { uri: "https://open.spotify.com/track/aaaa1111", trackId: "aaaa1111" };
+    const next = addTracksToPlaylist(lists(), "one", [relinked]);
+    expect(next[0].tracks).toEqual([TRACK_A]);
+  });
+
+  it("lands a track listed twice in one batch once, at its first position", () => {
+    const next = addTracksToPlaylist(lists(), "two", [TRACK_B, TRACK_A, TRACK_B]);
+    expect(next[1].tracks).toEqual([TRACK_B, TRACK_A]);
+  });
+
+  it("returns the same playlist object when every track is already held", () => {
+    const before = lists();
+    expect(addTracksToPlaylist(before, "one", [TRACK_A])[0]).toBe(before[0]);
   });
 
   it("leaves other playlists alone", () => {

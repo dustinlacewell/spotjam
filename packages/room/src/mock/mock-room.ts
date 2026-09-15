@@ -11,6 +11,7 @@
 
 import {
   NULL_POINTER,
+  appendUniqueTracks,
   type Participant,
   type PlaybackPointer,
   type Progress,
@@ -191,9 +192,10 @@ export class MockRoom implements Room {
 
   // --- queue ops -----------------------------------------------------
 
+  /** One entry per track, as the server has it: the existing entry wins. */
   appendToMyQueue(items: QueueItem[]): void {
     if (items.length === 0) return;
-    this.#mapMyQueue((queue) => [...queue, ...items]);
+    this.#mapMyQueue((queue) => appendUniqueTracks(queue, items));
   }
 
   replaceMyQueue(items: QueueItem[]): void {

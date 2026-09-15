@@ -99,6 +99,15 @@ describe("queue operations", () => {
     expect(ids(state, ALICE)).toEqual(["t1"]);
   });
 
+  it("drops a fresh item for a track the queue already holds, keeping the existing one", () => {
+    const again: QueueItem = { id: "later", uri: "spotify:track:t1", trackId: "t1" };
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.enqueue(state, ALICE, [track("t1")]);
+    state = Room.enqueue(state, ALICE, [again, track("t2")]);
+
+    expect(ids(state, ALICE)).toEqual(["t1", "t2"]);
+  });
+
   it("never mutates the input state", () => {
     const before = Room.enqueue(roomWith([ALICE, "alice"]), ALICE, [track("t1")]);
     const after = Room.enqueue(before, ALICE, [track("t2")]);

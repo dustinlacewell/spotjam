@@ -192,6 +192,19 @@ describe("MockRoom playback rules", () => {
     room.destroy();
   });
 
+  it("holds each track once in my queue, keeping the existing entry", () => {
+    const room = new MockRoom({
+      myPubkey: ME,
+      clock: () => EPOCH,
+      playing: null,
+      participants: [{ pubkey: ME, username: "me", broadcasting: false, queue: [track("m1")] }],
+    });
+
+    room.appendToMyQueue([{ id: "again", uri: "spotify:track:m1", trackId: "m1" }, track("m2")]);
+    expect(room.myQueue().map((item) => item.id)).toEqual(["m1", "m2"]);
+    room.destroy();
+  });
+
   it("uses the injected rng for shuffle, so an order can be pinned", () => {
     const room = new MockRoom({
       myPubkey: ME,

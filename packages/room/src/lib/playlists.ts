@@ -1,4 +1,4 @@
-import type { SharedPlaylist } from "@spotjam/protocol";
+import { appendUniqueTracks, type SharedPlaylist } from "@spotjam/protocol";
 import type { ParsedTrack } from "./spotify-link";
 import { shuffled } from "./shuffle";
 
@@ -31,7 +31,8 @@ export function createPlaylist(lists: Playlist[], name: string, id?: string): Pl
 /**
  * Creates a playlist that already holds tracks — one step, so an import lands
  * in a single save. A name that already exists is kept as-is; duplicate names
- * are allowed because ids, not names, identify a playlist.
+ * are allowed because ids, not names, identify a playlist. A track listed
+ * twice lands once, at its first position.
  */
 export function createPlaylistWithTracks(
   lists: Playlist[],
@@ -41,7 +42,7 @@ export function createPlaylistWithTracks(
 ): Playlist[] {
   const created = createPlaylist(lists, name, id);
   const fresh = created[created.length - 1];
-  return [...created.slice(0, -1), { ...fresh, tracks: [...tracks] }];
+  return [...created.slice(0, -1), { ...fresh, tracks: [...appendUniqueTracks([], tracks)] }];
 }
 
 export function deletePlaylist(lists: Playlist[], id: string): Playlist[] {
@@ -54,13 +55,17 @@ export function renamePlaylist(lists: Playlist[], id: string, name: string): Pla
   return mapList(lists, id, (list) => ({ ...list, name: trimmed }));
 }
 
+/** A playlist holds each track once. The entry already in place wins. */
 export function addTracksToPlaylist(
   lists: Playlist[],
   id: string,
   tracks: ParsedTrack[],
 ): Playlist[] {
   if (tracks.length === 0) return lists;
-  return mapList(lists, id, (list) => ({ ...list, tracks: [...list.tracks, ...tracks] }));
+  return mapList(lists, id, (list) => {
+    const next = appendUniqueTracks(list.tracks, tracks);
+    return next === list.tracks ? list : { ...list, tracks: [...next] };
+  });
 }
 
 /** Randomizes a playlist's stored order. Fewer than two tracks is a no-op. */

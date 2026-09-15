@@ -77,6 +77,8 @@ export {
   type ServerEventType,
 } from "./events.js";
 
+export { appendUniqueTracks, type HasTrackId } from "./tracks.js";
+
 export {
   isQuery,
   type Query,
