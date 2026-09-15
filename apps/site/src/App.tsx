@@ -12,10 +12,11 @@ export function App() {
   // are the same answer.
   const latest = useLatestRelease();
   const version = latest.state === "known" ? latest.version : null;
+  const hasDownloads = latest.state === "known" && latest.downloads.length > 0;
 
   return (
     <div className={styles.page}>
-      <Hero />
+      <Hero downloadHref={hasDownloads ? "#download" : RELEASES_URL} />
       <RoomPreview />
       <Features />
       {latest.state === "known" && version !== null ? (

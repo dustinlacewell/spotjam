@@ -4,6 +4,9 @@
   align-items: center;
   gap: var(--space-5);
   padding: var(--space-7) var(--space-4);
+  /* Jumping here from the hero should not put the heading against the very
+     top of the window. */
+  scroll-margin-top: var(--space-6);
 }
 
 .heading {

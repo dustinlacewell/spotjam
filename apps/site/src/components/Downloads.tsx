@@ -12,7 +12,7 @@ export function Downloads({ version, downloads }: { version: string; downloads: 
   if (groups.length === 0) return null;
 
   return (
-    <section className={styles.section}>
+    <section id="download" className={styles.section}>
       <h2 className={styles.heading}>
         Download <span className={styles.version}>v{version}</span>
       </h2>

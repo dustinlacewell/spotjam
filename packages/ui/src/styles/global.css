@@ -4,6 +4,14 @@
   box-sizing: border-box;
 }
 
+/* In-page jumps glide rather than teleport, unless the reader asked for
+   less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 html,
 body,
 #root {
