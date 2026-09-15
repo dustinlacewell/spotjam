@@ -12,6 +12,8 @@
     "server": "pnpm --filter @spotjam/server dev"
   },
   "devDependencies": {
-    "typescript": "~6.0.3"
+    "@ldlework/workmark": "^1.6.0",
+    "typescript": "~6.0.3",
+    "zod": "^4.6.5"
   }
 }
