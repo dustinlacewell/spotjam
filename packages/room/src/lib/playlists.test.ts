@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ParsedTrack } from "./spotify-link";
 import {
-  addTracksToPlaylist,
   createPlaylist,
   createPlaylistWithTracks,
   deletePlaylist,
+  insertTracksIntoPlaylist,
   removeTrackFromPlaylist,
   renamePlaylist,
   setPlaylistPublic,
@@ -15,6 +15,7 @@ import {
 
 const TRACK_A: ParsedTrack = { uri: "spotify:track:aaaa1111", trackId: "aaaa1111" };
 const TRACK_B: ParsedTrack = { uri: "spotify:track:bbbb2222", trackId: "bbbb2222" };
+const TRACK_C: ParsedTrack = { uri: "spotify:track:cccc3333", trackId: "cccc3333" };
 
 function lists(): Playlist[] {
   return [
@@ -120,44 +121,52 @@ describe("renamePlaylist", () => {
   });
 });
 
-describe("addTracksToPlaylist", () => {
+describe("insertTracksIntoPlaylist", () => {
   it("appends tracks and skips one the playlist already holds", () => {
-    const next = addTracksToPlaylist(lists(), "one", [TRACK_A, TRACK_B]);
+    const next = insertTracksIntoPlaylist(lists(), "one", [TRACK_A, TRACK_B], null);
     expect(next[0].tracks).toEqual([TRACK_A, TRACK_B]);
   });
 
   it("keeps the existing entry, not the incoming one, for a duplicate", () => {
     const relinked: ParsedTrack = { uri: "https://open.spotify.com/track/aaaa1111", trackId: "aaaa1111" };
-    const next = addTracksToPlaylist(lists(), "one", [relinked]);
+    const next = insertTracksIntoPlaylist(lists(), "one", [relinked], null);
     expect(next[0].tracks).toEqual([TRACK_A]);
   });
 
   it("lands a track listed twice in one batch once, at its first position", () => {
-    const next = addTracksToPlaylist(lists(), "two", [TRACK_B, TRACK_A, TRACK_B]);
+    const next = insertTracksIntoPlaylist(lists(), "two", [TRACK_B, TRACK_A, TRACK_B], null);
     expect(next[1].tracks).toEqual([TRACK_B, TRACK_A]);
   });
 
-  it("returns the same playlist object when every track is already held", () => {
-    const before = lists();
-    expect(addTracksToPlaylist(before, "one", [TRACK_A])[0]).toBe(before[0]);
+  it("inserts before the named track", () => {
+    const seeded = insertTracksIntoPlaylist(lists(), "one", [TRACK_C], null);
+    const next = insertTracksIntoPlaylist(seeded, "one", [TRACK_B], "cccc3333");
+    expect(next[0].tracks).toEqual([TRACK_A, TRACK_B, TRACK_C]);
   });
 
-  it("leaves other playlists alone", () => {
+  it("appends at the end when beforeTrackId is not found", () => {
+    const next = insertTracksIntoPlaylist(lists(), "one", [TRACK_B], "missing");
+    expect(next[0].tracks).toEqual([TRACK_A, TRACK_B]);
+  });
+
+  it("is a no-op for an empty track list, an unknown id, or when nothing new arrives", () => {
+    expect(insertTracksIntoPlaylist(lists(), "one", [], "x")).toEqual(lists());
+    expect(insertTracksIntoPlaylist(lists(), "missing", [TRACK_B], null)).toEqual(lists());
     const before = lists();
-    const next = addTracksToPlaylist(before, "one", [TRACK_B]);
+    expect(insertTracksIntoPlaylist(before, "one", [TRACK_A], null)[0]).toBe(before[0]);
+  });
+
+  it("leaves other playlists alone and never mutates", () => {
+    const before = lists();
+    const next = insertTracksIntoPlaylist(before, "one", [TRACK_B], null);
     expect(next[1]).toBe(before[1]);
     expect(before[0].tracks).toEqual([TRACK_A]);
-  });
-
-  it("is a no-op for an empty track list or unknown id", () => {
-    expect(addTracksToPlaylist(lists(), "one", [])).toEqual(lists());
-    expect(addTracksToPlaylist(lists(), "missing", [TRACK_B])).toEqual(lists());
   });
 });
 
 describe("removeTrackFromPlaylist", () => {
   it("removes the track at the index", () => {
-    const seeded = addTracksToPlaylist(lists(), "one", [TRACK_B]);
+    const seeded = insertTracksIntoPlaylist(lists(), "one", [TRACK_B], null);
     const next = removeTrackFromPlaylist(seeded, "one", 0);
     expect(next[0].tracks).toEqual([TRACK_B]);
   });
@@ -177,7 +186,7 @@ describe("removeTrackFromPlaylist", () => {
 describe("shufflePlaylist", () => {
   it("keeps the same tracks and never mutates", () => {
     const before = lists();
-    const seeded = addTracksToPlaylist(before, "one", [TRACK_B]);
+    const seeded = insertTracksIntoPlaylist(before, "one", [TRACK_B], null);
     const next = shufflePlaylist(seeded, "one");
     expect([...next[0].tracks].sort(byId)).toEqual([TRACK_A, TRACK_B].sort(byId));
     expect(before[0].tracks).toEqual([TRACK_A]);

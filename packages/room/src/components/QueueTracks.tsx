@@ -81,10 +81,6 @@ export function QueueTracks({
         </div>
       )}
 
-      {source.kind === "mine" && count > 0 && !source.isBroadcasting && (
-        <HintLine tone="muted">You're not broadcasting — your queue won't play.</HintLine>
-      )}
-
       {editable ? (
         <AddTrackBar
           placeholder="Paste a track or playlist link"

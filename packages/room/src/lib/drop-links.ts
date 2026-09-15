@@ -10,6 +10,18 @@ export interface DropData {
 export const INTERNAL_DRAG_MIME = "application/x-spotjam-item";
 
 /**
+ * True during an external Spotify-link drag (dataTransfer types are readable
+ * on `dragover`, not on `dragenter` in every browser, so this checks `types`
+ * rather than reading the payload). An in-app reorder drag carries neither
+ * MIME type, so it is never mistaken for one.
+ */
+export function carriesTracks(data: DataTransfer): boolean {
+  const types = Array.from(data.types);
+  if (types.includes(INTERNAL_DRAG_MIME)) return false;
+  return types.includes("text/uri-list") || types.includes("text/plain");
+}
+
+/**
  * Reads the Spotify tracks out of a drop from the Spotify desktop app. Spotify
  * puts the share URLs in text/uri-list, text/plain, or both; we take the union
  * and dedupe. Drags that started inside spotjam yield nothing.

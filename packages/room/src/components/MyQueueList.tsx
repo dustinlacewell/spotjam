@@ -21,9 +21,10 @@ export function MyQueueList({
   onSendToTop: (itemId: string) => void;
   onRemove: (itemId: string) => void;
 }) {
-  // Shift-click extends a range from this row; plain click replaces the
-  // selection with just the clicked row (or clears it, clicking the only
-  // selected row).
+  // Shift-click extends a range from this row; ctrl/cmd-click toggles this
+  // row in or out of the selection, leaving the rest as-is (so a drag can
+  // carry a non-contiguous set); plain click replaces the selection with
+  // just the clicked row (or clears it, clicking the only selected row).
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [anchorId, setAnchorId] = useState<string | null>(null);
   const [draggedIds, setDraggedIds] = useState<ReadonlySet<string> | null>(null);
@@ -52,6 +53,16 @@ export function MyQueueList({
       setSelectedIds(new Set(items.slice(start, end + 1).map((item) => item.id)));
       return;
     }
+    if (e.ctrlKey || e.metaKey) {
+      setAnchorId(itemId);
+      setSelectedIds((current) => {
+        const next = new Set(current);
+        if (next.has(itemId)) next.delete(itemId);
+        else next.add(itemId);
+        return next;
+      });
+      return;
+    }
     setAnchorId(itemId);
     setSelectedIds((current) => (current.size === 1 && current.has(itemId) ? new Set() : new Set([itemId])));
   }
@@ -73,8 +84,7 @@ export function MyQueueList({
 
   function handleDrop() {
     if (draggedIds !== null && overGap !== null) {
-      const beforeItemId = items[overGap]?.id ?? null;
-      onMoveMany([...draggedIds], beforeItemId);
+      onMoveMany([...draggedIds], resolveBeforeItemId(overGap, draggedIds));
     }
     handleDragEnd();
   }
@@ -83,8 +93,26 @@ export function MyQueueList({
   // reuse moveMany itself so this can't drift from what a real drop does.
   function isNoopGap(gap: number): boolean {
     if (draggedIds === null) return false;
-    const beforeItemId = items[gap]?.id ?? null;
-    return moveMany(items, [...draggedIds], beforeItemId) === items;
+    return moveMany(items, [...draggedIds], resolveBeforeItemId(gap, draggedIds)) === items;
+  }
+
+  /**
+   * The item a gap should land the block before, skipping past any item
+   * that is itself part of the drag.
+   *
+   * A non-contiguous selection leaves other selected rows sitting between
+   * the gap and the nearest surviving neighbour — e.g. dropping between two
+   * selected rows, or right before one. Naming that dragged row as the
+   * target makes `moveMany` treat it as "not found" and dump the whole
+   * block at the end. Walking forward to the next item that is *not* moving
+   * gives the drop its real, stable destination instead.
+   */
+  function resolveBeforeItemId(gap: number, dragging: ReadonlySet<string>): string | null {
+    for (let i = gap; i < items.length; i++) {
+      const candidate = items[i];
+      if (candidate !== undefined && !dragging.has(candidate.id)) return candidate.id;
+    }
+    return null;
   }
 
   return (

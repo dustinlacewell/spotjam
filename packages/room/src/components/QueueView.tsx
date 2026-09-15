@@ -10,6 +10,7 @@ import type {
 import type { Playlist } from "../lib/playlists";
 import type { ConnectionStatus } from "../lib/room-client";
 import type { Room } from "../ports/room";
+import type { ImportedPlaylist } from "../ports/playlist-importer";
 import { toQueueItems } from "../lib/room-client";
 import { toSharedPlaylists } from "../lib/playlists";
 import { displayedProgress } from "../lib/progress";
@@ -44,17 +45,21 @@ export function QueueView({
   const { createWithTracks } = playlistsApi;
   const myPubkey = room.myPubkey;
 
-  // An imported playlist becomes a new local playlist and takes over the view.
-  const onImported = useCallback(
-    (name: string, tracks: ParsedTrack[]) => {
-      const id = createWithTracks(name, tracks);
-      setSelection(myPubkey);
-      setPane(id);
-    },
-    [createWithTracks, myPubkey],
-  );
+  const { importStatus, startImports } = usePlaylistImport();
 
-  const { importStatus, startImports } = usePlaylistImport(onImported);
+  // A playlist link dropped on the playlist list, or on another playlist's
+  // pane, has one sane meaning: it becomes a new local playlist, which then
+  // takes over the view.
+  const importAsNewPlaylist = useCallback(
+    (playlists: ParsedPlaylist[]) => {
+      startImports(playlists, (imported) => {
+        const id = createWithTracks(imported.name, imported.tracks);
+        setSelection(myPubkey);
+        setPane(id);
+      });
+    },
+    [startImports, createWithTracks, myPubkey],
+  );
 
   usePublishedPlaylists(room, playlistsApi.playlists, status.synced);
 
@@ -94,12 +99,26 @@ export function QueueView({
   }
 
   /**
-   * Every drop and paste lands here: the tracks go wherever that surface sends
-   * them, and any playlist links import as new local playlists alongside.
+   * A playlist link dropped on the queue has a different meaning than one
+   * dropped on the playlist list: its tracks join the queue directly, rather
+   * than becoming a new local playlist.
    */
-  function handleLinks(links: ParsedLinks, onTracks: (tracks: ParsedTrack[]) => void) {
+  function importIntoQueue(playlists: ParsedPlaylist[]) {
+    startImports(playlists, (imported) => appendTracks(imported.tracks));
+  }
+
+  /**
+   * Every drop and paste lands here: the tracks go wherever that surface
+   * sends them, and any playlist links resolve through whichever policy that
+   * surface passes in — a new local playlist, or straight into the queue.
+   */
+  function handleLinks(
+    links: ParsedLinks,
+    onTracks: (tracks: ParsedTrack[]) => void,
+    onPlaylists: (playlists: ParsedPlaylist[]) => void,
+  ) {
     if (links.tracks.length > 0) onTracks(links.tracks);
-    if (links.playlists.length > 0) startImports(links.playlists);
+    if (links.playlists.length > 0) onPlaylists(links.playlists);
   }
 
   return (
@@ -155,7 +174,7 @@ export function QueueView({
               <QueueTracks
                 source={queueSource}
                 importStatus={importStatus}
-                onLinks={(links) => handleLinks(links, appendTracks)}
+                onLinks={(links) => handleLinks(links, appendTracks, importIntoQueue)}
                 onMoveMany={(itemIds, beforeItemId) => room.moveManyInMyQueue(itemIds, beforeItemId)}
                 onSendToTop={(itemId) => room.sendToTopOfMyQueue(itemId)}
                 onRemove={(itemId) => room.removeFromMyQueue(itemId)}
@@ -171,8 +190,9 @@ export function QueueView({
               onSelect={setPane}
               onAddToQueue={appendTracks}
               onReplaceQueue={(tracks) => room.replaceMyQueue(toQueueItems(tracks))}
-              onQueueLinks={(links) => handleLinks(links, appendTracks)}
-              onLinks={handleLinks}
+              onQueueLinks={(links) => handleLinks(links, appendTracks, importIntoQueue)}
+              onLinks={(links, onTracks) => handleLinks(links, onTracks, importAsNewPlaylist)}
+              onImportPlaylists={importAsNewPlaylist}
               onMoveMany={(itemIds, beforeItemId) => room.moveManyInMyQueue(itemIds, beforeItemId)}
               onSendToTop={(itemId) => room.sendToTopOfMyQueue(itemId)}
               onRemove={(itemId) => room.removeFromMyQueue(itemId)}
@@ -257,19 +277,26 @@ function nameOf(participants: Participant[], pubkey: string | null): string {
 const STATUS_LINGER_MS = 4000;
 
 /**
- * Runs playlist imports and reports one line about them. Failures surface as
- * that line — never as a thrown promise — because a bad link is an ordinary
- * thing for a user to drop.
+ * Fetches dropped or pasted playlist links and reports one status line about
+ * it. Failures surface as that line — never as a thrown promise — because a
+ * bad link is an ordinary thing for a user to drop.
+ *
+ * What an imported playlist becomes is the caller's call, chosen per drop
+ * surface: `startImports` takes that policy as an argument rather than
+ * baking in one global answer, so the playlist list (new local playlist) and
+ * the queue (enqueue the tracks) can share this one fetch-and-report
+ * mechanism, and its one status line, without contending over which meaning
+ * is "the" meaning of a dropped playlist link.
  */
-function usePlaylistImport(onImported: (name: string, tracks: ParsedTrack[]) => void): {
+function usePlaylistImport(): {
   importStatus: string | null;
-  startImports: (playlists: ParsedPlaylist[]) => void;
+  startImports: (playlists: ParsedPlaylist[], onImported: (imported: ImportedPlaylist) => void) => void;
 } {
   const { playlistImporter } = useRoomServices();
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const startImports = useCallback(
-    (playlists: ParsedPlaylist[]) => {
+    (playlists: ParsedPlaylist[], onImported: (imported: ImportedPlaylist) => void) => {
       if (playlists.length === 0) return;
       setImportStatus(
         `Importing ${playlists.length} playlist${playlists.length === 1 ? "" : "s"}...`,
@@ -278,14 +305,14 @@ function usePlaylistImport(onImported: (name: string, tracks: ParsedTrack[]) => 
       void Promise.all(
         playlists.map(async (playlist) => {
           const imported = await playlistImporter.import(playlist.uri);
-          onImported(imported.name, imported.tracks);
+          onImported(imported);
         }),
       ).then(
         () => setImportStatus(null),
         (error: unknown) => setImportStatus(`Couldn't import that playlist: ${messageOf(error)}`),
       );
     },
-    [onImported, playlistImporter],
+    [playlistImporter],
   );
 
   // Clear a failure line on its own rather than leaving it up forever.

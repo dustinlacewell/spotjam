@@ -63,10 +63,10 @@ export type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "./lib/spotify-lin
 // Playlists.
 
 export {
-  addTracksToPlaylist,
   createPlaylist,
   createPlaylistWithTracks,
   deletePlaylist,
+  insertTracksIntoPlaylist,
   removeTrackFromPlaylist,
   renamePlaylist,
   setPlaylistPublic,

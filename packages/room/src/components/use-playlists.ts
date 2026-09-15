@@ -1,10 +1,10 @@
 import { useCallback, useState } from "react";
 import type { ParsedTrack } from "../lib/spotify-link";
 import {
-  addTracksToPlaylist,
   createPlaylist,
   createPlaylistWithTracks,
   deletePlaylist,
+  insertTracksIntoPlaylist,
   removeTrackFromPlaylist,
   renamePlaylist,
   setPlaylistPublic,
@@ -20,7 +20,8 @@ export interface PlaylistsApi {
   createWithTracks(name: string, tracks: ParsedTrack[]): string;
   remove(id: string): void;
   rename(id: string, name: string): void;
-  addTracks(id: string, tracks: ParsedTrack[]): void;
+  /** Inserts just before `beforeTrackId`, or at the end when null or not found. */
+  insertTracks(id: string, tracks: ParsedTrack[], beforeTrackId: string | null): void;
   removeTrack(id: string, index: number): void;
   shuffle(id: string): void;
   /** Shares a playlist with the room, or takes it back. */
@@ -61,8 +62,9 @@ export function usePlaylists(): PlaylistsApi {
       (id: string, name: string) => apply((l) => renamePlaylist(l, id, name)),
       [apply],
     ),
-    addTracks: useCallback(
-      (id: string, tracks: ParsedTrack[]) => apply((l) => addTracksToPlaylist(l, id, tracks)),
+    insertTracks: useCallback(
+      (id: string, tracks: ParsedTrack[], beforeTrackId: string | null) =>
+        apply((l) => insertTracksIntoPlaylist(l, id, tracks, beforeTrackId)),
       [apply],
     ),
     removeTrack: useCallback(

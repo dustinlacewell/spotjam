@@ -17,6 +17,15 @@
   min-height: 0;
 }
 
+/*
+ * TrackDropZone's own class sets `flex: 1`, sized for the tracks pane it
+ * usually wraps. Composed onto this column it would override the fixed
+ * 200px width, so this reasserts it at matching (two-class) specificity.
+ */
+.listColumn.dropZone {
+  flex: 0 0 200px;
+}
+
 .playlists {
   list-style: none;
   margin: 0;

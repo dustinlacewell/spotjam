@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { ParsedLinks } from "../lib/spotify-link";
-import { INTERNAL_DRAG_MIME, linksFromDrop } from "../lib/drop-links";
+import { carriesTracks, linksFromDrop } from "../lib/drop-links";
 import styles from "./TrackDropZone.module.css";
 
 /**
@@ -11,9 +11,12 @@ import styles from "./TrackDropZone.module.css";
 export function TrackDropZone({
   onLinks,
   children,
+  className,
 }: {
   onLinks: (links: ParsedLinks) => void;
   children: React.ReactNode;
+  /** Composed with the zone's own layout class, for a caller with its own sizing. */
+  className?: string;
 }) {
   const [isOver, setIsOver] = useState(false);
   // dragenter/dragleave fire for every descendant; count them to know when we left.
@@ -26,7 +29,7 @@ export function TrackDropZone({
 
   return (
     <div
-      className={isOver ? styles.zoneOver : styles.zone}
+      className={[isOver ? styles.zoneOver : styles.zone, className].filter(Boolean).join(" ")}
       onDragEnter={(e) => {
         if (!carriesTracks(e.dataTransfer)) return;
         depth.current += 1;
@@ -54,10 +57,4 @@ export function TrackDropZone({
       {children}
     </div>
   );
-}
-
-function carriesTracks(data: DataTransfer): boolean {
-  const types = Array.from(data.types);
-  if (types.includes(INTERNAL_DRAG_MIME)) return false;
-  return types.includes("text/uri-list") || types.includes("text/plain");
 }

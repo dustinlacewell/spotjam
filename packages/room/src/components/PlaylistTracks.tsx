@@ -1,17 +1,18 @@
-import { useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { ListPlus, ListStart, Shuffle } from "lucide-react";
 import { HintLine, IconButton, TextField } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
 import type { ParsedLinks, ParsedTrack } from "../lib/spotify-link";
 import type { Playlist } from "../lib/playlists";
 import { parseSpotifyLinks } from "../lib/spotify-link";
+import { carriesTracks, linksFromDrop } from "../lib/drop-links";
 import { matchesTrack } from "../lib/track-search";
 import { AddTrackBar } from "./AddTrackBar";
 import { PublicToggle } from "./PublicToggle";
 import { QueueItemCard } from "./QueueItemCard";
-import { TrackDropZone } from "./TrackDropZone";
 import { useTrackMetadataMap } from "./use-track-metadata";
 import styles from "./PlaylistsPanel.module.css";
+import listStyles from "./QueueLists.module.css";
 
 export function PlaylistTracks({
   playlist,
@@ -30,8 +31,11 @@ export function PlaylistTracks({
    * changes its tracks, its order, or whether the room can see it.
    */
   readOnly: boolean;
-  /** Tracks join this playlist; playlist links import as new playlists. */
-  onLinks: (links: ParsedLinks) => void;
+  /**
+   * Tracks join this playlist at `beforeTrackId` (or the end, when null);
+   * playlist links import as new playlists regardless of drop position.
+   */
+  onLinks: (links: ParsedLinks, beforeTrackId: string | null) => void;
   onRemoveTrack: (index: number) => void;
   onAddToQueue: () => void;
   onReplaceQueue: () => void;
@@ -42,11 +46,33 @@ export function PlaylistTracks({
   importStatus: string | null;
 }) {
   const [query, setQuery] = useState("");
+  // The gap a hovering drag would drop into: an index into visibleTracks
+  // (drop before that track), visibleTracks.length (drop at the end), or
+  // null while no drag is over the list.
+  const [overGap, setOverGap] = useState<number | null>(null);
+  // dragenter/dragleave fire for every descendant; count them to know when
+  // the drag actually left the zone rather than crossed into a child.
+  const dragDepth = useRef(0);
   const isEmpty = playlist.tracks.length === 0;
   const metadataByUri = useTrackMetadataMap(playlist.tracks.map((t) => t.uri));
+  const filtering = query.trim() !== "";
   const visibleTracks = playlist.tracks
     .map((track, index) => ({ track, index }))
     .filter(({ track }) => matchesTrack(query, metadataByUri.get(track.uri), track.trackId));
+
+  function resetDrag() {
+    dragDepth.current = 0;
+    setOverGap(null);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    if (!carriesTracks(e.dataTransfer)) return;
+    e.preventDefault();
+    const beforeTrackId = overGap === null ? null : (visibleTracks[overGap]?.track.trackId ?? null);
+    resetDrag();
+    const links = linksFromDrop(e.dataTransfer);
+    if (links.tracks.length > 0 || links.playlists.length > 0) onLinks(links, beforeTrackId);
+  }
 
   const body = isEmpty ? (
     <p className={styles.empty}>
@@ -58,14 +84,29 @@ export function PlaylistTracks({
     <p className={styles.empty}>No tracks match "{query}".</p>
   ) : (
     <ul className={styles.trackList}>
-      {visibleTracks.map(({ track, index }) => (
-        <QueueItemCard
-          key={`${track.trackId}-${index}`}
-          item={cardItem(track, index)}
-          isPlaying={false}
-          ownerLabel=""
-          onRemove={readOnly ? undefined : () => onRemoveTrack(index)}
-        />
+      {!filtering && <DropIndicator active={overGap === 0} />}
+      {visibleTracks.map(({ track, index }, position) => (
+        <Fragment key={`${track.trackId}-${index}`}>
+          <QueueItemCard
+            item={cardItem(track, index)}
+            isPlaying={false}
+            ownerLabel=""
+            onRemove={readOnly ? undefined : () => onRemoveTrack(index)}
+            onDragOver={
+              readOnly || filtering
+                ? undefined
+                : (e) => {
+                    if (!carriesTracks(e.dataTransfer)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "copy";
+                    const row = e.currentTarget.getBoundingClientRect();
+                    const isTopHalf = e.clientY < row.top + row.height / 2;
+                    setOverGap(isTopHalf ? position : position + 1);
+                  }
+            }
+          />
+          {!filtering && <DropIndicator active={overGap === position + 1} />}
+        </Fragment>
       ))}
     </ul>
   );
@@ -127,9 +168,26 @@ export function PlaylistTracks({
       {readOnly ? (
         <div className={styles.tracksScroll}>{body}</div>
       ) : (
-        <TrackDropZone onLinks={onLinks}>
-          <div className={styles.tracksScroll}>{body}</div>
-        </TrackDropZone>
+        <div
+          className={styles.tracksScroll}
+          onDragEnter={(e) => {
+            if (!carriesTracks(e.dataTransfer)) return;
+            dragDepth.current += 1;
+          }}
+          onDragOver={(e) => {
+            if (!carriesTracks(e.dataTransfer)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDragLeave={(e) => {
+            if (!carriesTracks(e.dataTransfer)) return;
+            dragDepth.current -= 1;
+            if (dragDepth.current <= 0) resetDrag();
+          }}
+          onDrop={handleDrop}
+        >
+          {body}
+        </div>
       )}
 
       {readOnly ? (
@@ -144,7 +202,7 @@ export function PlaylistTracks({
             if (links.tracks.length === 0 && links.playlists.length === 0) {
               return "That doesn't look like a Spotify track or playlist link.";
             }
-            onLinks(links);
+            onLinks(links, null);
             return null;
           }}
         />
@@ -160,4 +218,14 @@ function cardItem(track: ParsedTrack, index: number): QueueItem {
     uri: track.uri,
     trackId: track.trackId,
   };
+}
+
+/** The line between rows that shows where a dropped track will land. */
+function DropIndicator({ active }: { active: boolean }) {
+  return (
+    <li
+      className={`${listStyles.dropIndicator} ${active ? listStyles.dropIndicatorActive : ""}`}
+      aria-hidden
+    />
+  );
 }

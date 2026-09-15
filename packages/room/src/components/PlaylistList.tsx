@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Button, IconButton, ListRow, TextField } from "@spotjam/ui";
 import type { Playlist } from "../lib/playlists";
+import type { ParsedPlaylist } from "../lib/spotify-link";
+import { TrackDropZone } from "./TrackDropZone";
 import { QUEUE_PANE, type PaneSelection } from "./pane-selection";
 import styles from "./PlaylistsPanel.module.css";
 
@@ -17,6 +19,7 @@ export function PlaylistList({
   onCancelRename,
   onDelete,
   onCreate,
+  onImportPlaylists,
 }: {
   playlists: Playlist[];
   /** Track count for the pinned queue row. */
@@ -33,9 +36,11 @@ export function PlaylistList({
   onCancelRename: () => void;
   onDelete: (id: string) => void;
   onCreate: () => void;
+  /** A playlist link dropped anywhere on this list imports it as a new playlist. */
+  onImportPlaylists: (playlists: ParsedPlaylist[]) => void;
 }) {
-  return (
-    <div className={styles.listColumn}>
+  const listBody = (
+    <>
       <ul className={styles.playlists}>
         <li>
           <ListRow
@@ -97,7 +102,22 @@ export function PlaylistList({
           + New playlist
         </Button>
       )}
-    </div>
+    </>
+  );
+
+  if (readOnly) {
+    return <div className={styles.listColumn}>{listBody}</div>;
+  }
+
+  return (
+    <TrackDropZone
+      className={`${styles.listColumn} ${styles.dropZone}`}
+      onLinks={(links) => {
+        if (links.playlists.length > 0) onImportPlaylists(links.playlists);
+      }}
+    >
+      {listBody}
+    </TrackDropZone>
   );
 }
 

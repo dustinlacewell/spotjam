@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SharedPlaylist } from "@spotjam/protocol";
 import type { Playlist } from "../lib/playlists";
-import type { ParsedLinks, ParsedTrack } from "../lib/spotify-link";
+import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import type { PlaylistsApi } from "./use-playlists";
 import { PlaylistList } from "./PlaylistList";
 import { PlaylistTracks } from "./PlaylistTracks";
@@ -24,6 +24,7 @@ export function DetailPane({
   onReplaceQueue,
   onQueueLinks,
   onLinks,
+  onImportPlaylists,
   onMoveMany,
   onSendToTop,
   onRemove,
@@ -42,6 +43,8 @@ export function DetailPane({
   onQueueLinks: (links: ParsedLinks) => void;
   /** Tracks land in the open playlist; playlist links import as new playlists. */
   onLinks: (links: ParsedLinks, onTracks: (tracks: ParsedTrack[]) => void) => void;
+  /** A playlist link dropped on the playlist list imports it as a new playlist. */
+  onImportPlaylists: (playlists: ParsedPlaylist[]) => void;
   onMoveMany: (itemIds: string[], beforeItemId: string | null) => void;
   onSendToTop: (itemId: string) => void;
   onRemove: (itemId: string) => void;
@@ -50,7 +53,7 @@ export function DetailPane({
   onClear: () => void;
   importStatus: string | null;
 }) {
-  const { playlists, create, remove, rename, addTracks, removeTrack, shuffle, setPublic } = api;
+  const { playlists, create, remove, rename, insertTracks, removeTrack, shuffle, setPublic } = api;
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [pendingName, setPendingName] = useState<string | null>(null);
 
@@ -102,13 +105,16 @@ export function DetailPane({
           if (id === renamingId) setRenamingId(null);
         }}
         onCreate={handleCreate}
+        onImportPlaylists={onImportPlaylists}
       />
 
       {openPlaylist ? (
         <PlaylistTracks
           playlist={openPlaylist}
           readOnly={readOnly}
-          onLinks={(links) => onLinks(links, (tracks) => addTracks(openPlaylist.id, tracks))}
+          onLinks={(links, beforeTrackId) =>
+            onLinks(links, (tracks) => insertTracks(openPlaylist.id, tracks, beforeTrackId))
+          }
           onRemoveTrack={(index) => removeTrack(openPlaylist.id, index)}
           onAddToQueue={() => onAddToQueue(openPlaylist.tracks)}
           onReplaceQueue={() => onReplaceQueue(openPlaylist.tracks)}

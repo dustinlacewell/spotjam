@@ -55,16 +55,33 @@ export function renamePlaylist(lists: Playlist[], id: string, name: string): Pla
   return mapList(lists, id, (list) => ({ ...list, name: trimmed }));
 }
 
-/** A playlist holds each track once. The entry already in place wins. */
-export function addTracksToPlaylist(
+/**
+ * Insert tracks just before `beforeTrackId`, or at the end when it is `null`
+ * or not found. A track holds each `trackId` once, so a dropped track that
+ * duplicates one already in the playlist is skipped rather than moved.
+ */
+export function insertTracksIntoPlaylist(
   lists: Playlist[],
   id: string,
   tracks: ParsedTrack[],
+  beforeTrackId: string | null,
 ): Playlist[] {
   if (tracks.length === 0) return lists;
   return mapList(lists, id, (list) => {
-    const next = appendUniqueTracks(list.tracks, tracks);
-    return next === list.tracks ? list : { ...list, tracks: [...next] };
+    const seen = new Set(list.tracks.map((track) => track.trackId));
+    const fresh: ParsedTrack[] = [];
+    for (const track of tracks) {
+      if (seen.has(track.trackId)) continue;
+      seen.add(track.trackId);
+      fresh.push(track);
+    }
+    if (fresh.length === 0) return list;
+
+    const insertAt = list.tracks.findIndex((track) => track.trackId === beforeTrackId);
+    const targetIndex = insertAt < 0 ? list.tracks.length : insertAt;
+    const nextTracks = [...list.tracks];
+    nextTracks.splice(targetIndex, 0, ...fresh);
+    return { ...list, tracks: nextTracks };
   });
 }
 
