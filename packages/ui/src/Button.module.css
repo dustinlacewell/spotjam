@@ -1,0 +1,146 @@
+.base {
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: none;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* --- size scale (padding + font-size) --- */
+
+.lg {
+  padding: 14px var(--space-4);
+  font-size: var(--text-lg);
+}
+
+.md {
+  padding: 12px var(--space-4);
+  font-size: var(--text-md);
+}
+
+/* sm resolves to exactly 34px total height:
+   8px + 8px padding + 18px line-box = 34px (borderless),
+   and 7px + 7px + 18px + 2px border = 34px for bordered variants. */
+.sm {
+  padding: 8px var(--space-4);
+  font-size: var(--text-md);
+  line-height: 18px;
+}
+
+/* --- primary --- */
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  border: none;
+  border-radius: var(--radius-md);
+  transition: background var(--dur) var(--ease);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.primary:disabled {
+  background: var(--bg-card-hover);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* --- secondary --- */
+
+.secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: var(--radius-md);
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.secondary:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent-dim);
+  background: var(--bg-card);
+}
+
+.secondary:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* --- ghost --- */
+
+.ghost {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-faint);
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.ghost:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.ghost:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* --- danger --- */
+
+.danger {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: var(--radius-md);
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.danger:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* bordered variants lose 1px of padding per side so the sm box
+   still measures 34px including its border. */
+.secondary.sm,
+.ghost.sm,
+.danger.sm {
+  padding: 7px calc(var(--space-4) - 1px);
+}
+
+.secondary.md,
+.ghost.md,
+.danger.md {
+  padding: 11px calc(var(--space-4) - 1px);
+}
+
+.secondary.lg,
+.ghost.lg,
+.danger.lg {
+  padding: 13px calc(var(--space-4) - 1px);
+}

@@ -1,0 +1,26 @@
+.section {
+  display: flex;
+  justify-content: center;
+  padding: 0 var(--space-4) var(--space-7);
+}
+
+/* A flex column so the room screen's own `height: 100%` page has a real box
+   to fill. */
+.window {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 960px;
+  height: 600px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised);
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .window {
+    height: 70vh;
+  }
+}

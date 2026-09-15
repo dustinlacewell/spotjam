@@ -17,6 +17,12 @@ importers:
       '@spotjam/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@spotjam/room':
+        specifier: workspace:*
+        version: link:../../packages/room
+      '@spotjam/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.1
@@ -26,9 +32,6 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.5.5
-      lucide-react:
-        specifier: ^1.45.0
-        version: 1.45.0(react@19.3.0)
       react:
         specifier: ^19.1.0
         version: 19.3.0
@@ -80,6 +83,40 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@types/node@22.20.2)(vite@8.3.0(@types/node@22.20.2))
 
+  apps/site:
+    dependencies:
+      '@spotjam/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@spotjam/room':
+        specifier: workspace:*
+        version: link:../../packages/room
+      '@spotjam/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      react:
+        specifier: ^19.1.0
+        version: 19.3.0
+      react-dom:
+        specifier: ^19.1.0
+        version: 19.3.0(react@19.3.0)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.1.8
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.1.6
+        version: 19.3.0(@types/react@19.3.0)
+      '@vitejs/plugin-react':
+        specifier: ^6.0.2
+        version: 6.1.1(vite@8.3.0(@types/node@22.20.2))
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      vite:
+        specifier: ^8.0.16
+        version: 8.3.0(@types/node@22.20.2)
+
   packages/protocol:
     dependencies:
       '@noble/curves':
@@ -89,6 +126,46 @@ importers:
         specifier: ^1.7.1
         version: 1.8.0
     devDependencies:
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@22.20.2)(vite@8.3.0(@types/node@22.20.2))
+
+  packages/room:
+    dependencies:
+      '@spotjam/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@spotjam/ui':
+        specifier: workspace:*
+        version: link:../ui
+      lucide-react:
+        specifier: ^1.45.0
+        version: 1.45.0(react@19.3.0)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.1.8
+        version: 19.3.0
+      react:
+        specifier: ^19.1.0
+        version: 19.3.0
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@22.20.2)(vite@8.3.0(@types/node@22.20.2))
+
+  packages/ui:
+    devDependencies:
+      '@types/react':
+        specifier: ^19.1.8
+        version: 19.3.0
+      react:
+        specifier: ^19.1.0
+        version: 19.3.0
       typescript:
         specifier: ~6.0.3
         version: 6.0.3

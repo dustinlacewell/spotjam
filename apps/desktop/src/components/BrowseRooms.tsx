@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import type { RoomSummary } from "@spotjam/protocol";
+import { Button, ListRow, Mark, TextField, Thumbnail } from "@spotjam/ui";
 import type { Connection } from "../lib/connection";
 import { formatUptime } from "../lib/format-uptime";
-import { useTrackMetadata } from "../lib/use-track-metadata";
-import type { TrackMetadata } from "../lib/track-metadata";
+import { useTrackMetadata, type TrackInfo } from "@spotjam/room";
 import { RoomDetailPane } from "./RoomDetailPane";
 import { useLiveRooms } from "./use-live-rooms";
 import { useNow } from "./use-now";
@@ -11,6 +11,8 @@ import styles from "./BrowseRooms.module.css";
 
 /** Uptime is measured in minutes, so half a minute is a fine enough tick. */
 const UPTIME_TICK_MS = 30_000;
+
+const ROOM_GRID = "1fr 1.6fr 48px 60px";
 
 export function BrowseRooms({
   connection,
@@ -36,11 +38,11 @@ export function BrowseRooms({
   return (
     <div className={styles.page}>
       <header className={styles.header}>
-        <div className={styles.mark}>spotjam</div>
+        <Mark size="sm" />
         <div className={styles.headerRight}>
-          <button type="button" className={styles.backButton} onClick={onBack}>
+          <Button type="button" variant="secondary" size="sm" onClick={onBack}>
             ← Back
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -55,7 +57,7 @@ export function BrowseRooms({
             <div className={styles.empty}>No rooms are live right now.</div>
           ) : (
             <>
-              <div className={styles.columns}>
+              <div className={styles.columns} style={{ gridTemplateColumns: ROOM_GRID }}>
                 <span>Room</span>
                 <span>Now playing</span>
                 <span>Up</span>
@@ -104,9 +106,9 @@ function NewRoomSlot({
   return (
     <div className={styles.newRoomSlot}>
       {value === null ? (
-        <button type="button" className={styles.newRoomButton} onClick={() => onChange("")}>
+        <Button type="button" size="sm" onClick={() => onChange("")}>
           + New room
-        </button>
+        </Button>
       ) : (
         <form
           className={styles.newRoomForm}
@@ -116,27 +118,25 @@ function NewRoomSlot({
             if (id !== "") onCreate(id);
           }}
         >
-          <input
-            className={styles.newRoomInput}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="Room name"
-            autoFocus
-            spellCheck={false}
-            onBlur={() => {
-              if (value.trim() === "") onChange(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") onChange(null);
-            }}
-          />
-          <button
-            type="submit"
-            className={styles.newRoomSubmit}
-            disabled={value.trim() === ""}
-          >
+          <div className={styles.newRoomInput}>
+            <TextField
+              value={value}
+              onChange={onChange}
+              placeholder="Room name"
+              size="sm"
+              autoFocus
+              spellCheck={false}
+              onBlur={() => {
+                if (value.trim() === "") onChange(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") onChange(null);
+              }}
+            />
+          </div>
+          <Button type="submit" size="sm" disabled={value.trim() === ""}>
             Create
-          </button>
+          </Button>
         </form>
       )}
     </div>
@@ -147,7 +147,7 @@ function NewRoomSlot({
  * Room name while metadata is still loading, so a slow or failed lookup never
  * shows a bare "…" — the trailing slot below simply stays empty until then.
  */
-function trackTitle(room: RoomSummary, metadata: TrackMetadata | null): string {
+function trackTitle(room: RoomSummary, metadata: TrackInfo | null): string {
   if (room.trackUri === null) return "Nothing playing";
   return metadata?.title ?? room.trackUri.replace("spotify:track:", "");
 }
@@ -168,16 +168,17 @@ function RoomRow({
   const nowPlaying = room.trackUri === null ? null : metadata;
 
   return (
-    <button
-      type="button"
-      className={isSelected ? styles.roomRowSelected : styles.roomRow}
+    <ListRow
+      as="button"
+      layout="grid"
+      gridTemplate={ROOM_GRID}
+      selected={isSelected}
+      selectionStyle="outline"
       onClick={() => onSelect(room.roomId)}
     >
       <span className={styles.roomRowName}>{room.roomId}</span>
       <span className={styles.roomRowTrack}>
-        <span className={styles.roomRowArt}>
-          {nowPlaying?.thumbnailUrl && <img src={nowPlaying.thumbnailUrl} alt="" />}
-        </span>
+        <Thumbnail src={nowPlaying?.thumbnailUrl} size={32} />
         <span className={styles.roomRowTrackInfo}>
           <span className={styles.roomRowTrackTitle}>{trackTitle(room, nowPlaying)}</span>
           {nowPlaying?.artist && (
@@ -189,6 +190,6 @@ function RoomRow({
         {formatUptime(room.createdAtEpochMs, now)}
       </span>
       <span className={styles.roomRowCount}>{room.listeners}</span>
-    </button>
+    </ListRow>
   );
 }

@@ -1,0 +1,47 @@
+.base {
+  display: inline-block;
+  border-radius: var(--radius-circle);
+  flex-shrink: 0;
+}
+
+/* --- tone --- */
+
+.accent {
+  background: var(--accent);
+}
+
+.muted {
+  background: var(--text-faint);
+}
+
+.danger {
+  background: var(--danger);
+}
+
+/* Takes the parent's text color, so the dot matches the pill or label
+   it sits inside. */
+.current {
+  background: currentColor;
+}
+
+/* --- modifiers --- */
+
+/* Fixed 4px ring regardless of dot size, matching the existing
+   .markDot / .dot glow rings. */
+.glow {
+  box-shadow: 0 0 0 4px var(--accent-glow);
+}
+
+.pulse {
+  animation: ui-pulse 2s infinite;
+}
+
+@keyframes ui-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}

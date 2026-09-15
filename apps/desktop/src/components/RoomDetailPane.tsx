@@ -1,8 +1,7 @@
+import { Button, Thumbnail } from "@spotjam/ui";
 import type { RoomSnapshot, RoomSummary } from "@spotjam/protocol";
 import type { Connection } from "../lib/connection";
-import { formatClock } from "../lib/progress";
-import { useTrackMetadata } from "../lib/use-track-metadata";
-import { SessionQueueList } from "./SessionQueueList";
+import { formatClock, useTrackMetadata, SessionQueueList } from "@spotjam/room";
 import { useRoomDetail } from "./use-room-detail";
 import styles from "./RoomDetailPane.module.css";
 
@@ -35,9 +34,9 @@ export function RoomDetailPane({
             {room.listeners} {room.listeners === 1 ? "listener" : "listeners"}
           </div>
         </div>
-        <button type="button" className={styles.joinButton} onClick={() => onJoin(room.roomId)}>
+        <Button variant="primary" size="sm" onClick={() => onJoin(room.roomId)}>
           Join
-        </button>
+        </Button>
       </div>
       <NowPlaying snapshot={snapshot} />
       <div className={styles.queue}>
@@ -62,9 +61,7 @@ function NowPlaying({ snapshot }: { snapshot: RoomSnapshot | null }) {
 
   return (
     <div className={styles.nowPlaying}>
-      <div className={styles.art}>
-        {metadata?.thumbnailUrl && <img src={metadata.thumbnailUrl} alt="" />}
-      </div>
+      <Thumbnail src={metadata?.thumbnailUrl} size={56} />
       <div className={styles.info}>
         <div className={styles.label}>{pointer.isPaused ? "Paused" : "Now playing"}</div>
         <div className={styles.title}>{metadata?.title ?? pointer.uri}</div>

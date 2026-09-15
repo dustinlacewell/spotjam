@@ -1,0 +1,20 @@
+.box {
+  overflow: hidden;
+  background: var(--bg-raised);
+  flex-shrink: 0;
+}
+
+.radiusSm {
+  border-radius: var(--radius-sm);
+}
+
+.radiusMd {
+  border-radius: var(--radius-md);
+}
+
+.image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}

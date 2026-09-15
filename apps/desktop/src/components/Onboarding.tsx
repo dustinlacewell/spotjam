@@ -1,5 +1,13 @@
 import { useState } from "react";
 import { isValidUsername, USERNAME_MAX, USERNAME_MIN } from "@spotjam/protocol";
+import {
+  Button,
+  CenteredCardPage,
+  HintLine,
+  Mark,
+  SegmentedControl,
+  TextField,
+} from "@spotjam/ui";
 import type { StoredIdentity } from "../lib/identity";
 import { createIdentity, identityExportPath, importIdentity } from "../lib/identity";
 import { pickIdentityFile } from "../lib/identity-file-picker";
@@ -28,38 +36,25 @@ export function Onboarding({ onReady }: { onReady: (identity: StoredIdentity) =>
   const [mode, setMode] = useState<Mode>("create");
 
   return (
-    <div className={styles.page}>
-      <div className={styles.card}>
-        <div className={styles.mark}>
-          <span className={styles.markDot} />
-          spotjam
-        </div>
-        <p className={styles.tagline}>Your key is your account.</p>
+    <CenteredCardPage>
+      <Mark size="lg" />
+      <p className={styles.tagline}>Your key is your account.</p>
 
-        <div className={styles.modes}>
-          <button
-            type="button"
-            className={mode === "create" ? styles.modeActive : styles.mode}
-            onClick={() => setMode("create")}
-          >
-            New identity
-          </button>
-          <button
-            type="button"
-            className={mode === "import" ? styles.modeActive : styles.mode}
-            onClick={() => setMode("import")}
-          >
-            I have one
-          </button>
-        </div>
+      <SegmentedControl
+        value={mode}
+        onChange={setMode}
+        options={[
+          { value: "create", label: "New identity" },
+          { value: "import", label: "I have one" },
+        ]}
+      />
 
-        {mode === "create" ? (
-          <CreateIdentity onReady={onReady} />
-        ) : (
-          <ImportIdentity onReady={onReady} />
-        )}
-      </div>
-    </div>
+      {mode === "create" ? (
+        <CreateIdentity onReady={onReady} />
+      ) : (
+        <ImportIdentity onReady={onReady} />
+      )}
+    </CenteredCardPage>
   );
 }
 
@@ -96,9 +91,9 @@ function CreateIdentity({ onReady }: { onReady: (identity: StoredIdentity) => vo
           Back this file up. It is the only copy of your key, and it cannot be reissued.
         </p>
         <code className={styles.path}>{created.path}</code>
-        <button className={styles.button} type="button" onClick={() => onReady(created.identity)}>
+        <Button type="button" onClick={() => onReady(created.identity)}>
           Continue
-        </button>
+        </Button>
       </div>
     );
   }
@@ -111,19 +106,20 @@ function CreateIdentity({ onReady }: { onReady: (identity: StoredIdentity) => vo
         if (canSubmit) void submit();
       }}
     >
-      <input
-        className={styles.input}
+      <TextField
         value={username}
-        onChange={(e) => setUsername(e.target.value)}
+        onChange={setUsername}
         placeholder="Pick a name"
+        align="center"
+        size="lg"
         autoFocus
         spellCheck={false}
         maxLength={USERNAME_MAX}
       />
-      <p className={styles.hint}>{problem ?? error ?? ""}</p>
-      <button className={styles.button} type="submit" disabled={!canSubmit}>
+      <HintLine tone="error">{problem ?? error ?? ""}</HintLine>
+      <Button type="submit" disabled={!canSubmit}>
         {busy ? "Generating…" : "Create identity"}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -161,21 +157,24 @@ function ImportIdentity({ onReady }: { onReady: (identity: StoredIdentity) => vo
       }}
     >
       <div className={styles.row}>
-        <input
-          className={styles.input}
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          placeholder="Path to identity.json"
-          spellCheck={false}
-        />
-        <button className={styles.browse} type="button" onClick={() => void browse()}>
+        <div className={styles.rowField}>
+          <TextField
+            value={path}
+            onChange={setPath}
+            placeholder="Path to identity.json"
+            align="center"
+            size="lg"
+            spellCheck={false}
+          />
+        </div>
+        <Button type="button" variant="secondary" onClick={() => void browse()}>
           Browse
-        </button>
+        </Button>
       </div>
-      <p className={styles.hint}>{error ?? ""}</p>
-      <button className={styles.button} type="submit" disabled={!canSubmit}>
+      <HintLine tone="error">{error ?? ""}</HintLine>
+      <Button type="submit" disabled={!canSubmit}>
         {busy ? "Importing…" : "Use this identity"}
-      </button>
+      </Button>
     </form>
   );
 }

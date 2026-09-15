@@ -19,10 +19,10 @@ import type {
 import type { CanonicalValue } from "@spotjam/protocol";
 
 import { IdentityClient, identityClient } from "./identity";
-import { backoffMs, helloPayload, parseServerEvent, registerPayload } from "./room-client";
+import { backoffMs, helloPayload, parseServerEvent, registerPayload } from "@spotjam/room";
 
-export type { SocketPhase, ConnectionStatus } from "./room-client";
-import type { ConnectionStatus } from "./room-client";
+export type { SocketPhase, ConnectionStatus } from "@spotjam/room";
+import type { ConnectionStatus } from "@spotjam/room";
 
 /**
  * The deployed relay host. The spotjam server takes this hostname over from

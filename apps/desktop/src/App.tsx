@@ -2,11 +2,19 @@ import { useEffect, useState } from "react";
 import { BrowseRooms } from "./components/BrowseRooms";
 import { JoinRoom } from "./components/JoinRoom";
 import { Onboarding } from "./components/Onboarding";
-import { QueueView } from "./components/QueueView";
+import { QueueView, RoomServicesProvider, type RoomServices } from "@spotjam/room";
 import { Connection, Room } from "./lib/room";
 import { SyncDriver } from "./lib/sync-driver";
 import { loadIdentity, type StoredIdentity } from "./lib/identity";
 import { loadSessionPrefs, saveSessionPrefs } from "./lib/session-prefs";
+import { tauriTrackMetadata } from "./lib/track-metadata";
+import { tauriPlaylistImporter } from "./lib/playlist-import";
+
+/** The desktop shell's answer to what @spotjam/room asks of its surroundings. */
+const SERVICES: RoomServices = {
+  trackMetadata: tauriTrackMetadata,
+  playlistImporter: tauriPlaylistImporter,
+};
 
 interface Session {
   roomId: string;
@@ -18,7 +26,19 @@ type PreSessionView = "join" | "browse";
 /** Null until the on-disk lookup answers; then an identity, or none. */
 type IdentityState = { status: "loading" } | { status: "ready"; identity: StoredIdentity | null };
 
+/**
+ * Every screen resolves track metadata — the browser's room rows as much as the
+ * joined room — so the services provider sits above all of them.
+ */
 export default function App() {
+  return (
+    <RoomServicesProvider services={SERVICES}>
+      <Screens />
+    </RoomServicesProvider>
+  );
+}
+
+function Screens() {
   const [prefs] = useState(loadSessionPrefs);
   const [session, setSession] = useState<Session | null>(null);
   const [room, setRoom] = useState<Room | null>(null);

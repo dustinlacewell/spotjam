@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import type { ParsedTrack } from "./spotify-link";
+import type { ImportedPlaylist, ParsedTrack, PlaylistImporter } from "@spotjam/room";
 
 /** What the Rust `spotify_fetch_playlist` command returns. */
 export interface FetchedPlaylist {
@@ -7,10 +7,7 @@ export interface FetchedPlaylist {
   tracks: { uri: string; name: string; artist: string }[];
 }
 
-export interface ImportedPlaylist {
-  name: string;
-  tracks: ParsedTrack[];
-}
+export type { ImportedPlaylist };
 
 type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -28,6 +25,11 @@ export async function importPlaylist(
   const fetched = await invoke<FetchedPlaylist>("spotify_fetch_playlist", { uri });
   return { name: fetched.name, tracks: toParsedTracks(fetched.tracks) };
 }
+
+/** The Tauri-backed adapter the app hands to @spotjam/room. */
+export const tauriPlaylistImporter: PlaylistImporter = {
+  import: (uri) => importPlaylist(uri),
+};
 
 function toParsedTracks(entries: FetchedPlaylist["tracks"]): ParsedTrack[] {
   const tracks: ParsedTrack[] = [];

@@ -1,0 +1,65 @@
+.base {
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  transition: all var(--dur) var(--ease);
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  white-space: nowrap;
+}
+
+/* --- interactive (as="button", not disabled) --- */
+
+.interactive {
+  cursor: pointer;
+}
+
+.interactive:hover {
+  border-color: var(--accent-dim);
+}
+
+.interactive.danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* --- static span tones --- */
+
+.static.danger {
+  color: var(--danger);
+}
+
+/* --- active --- */
+
+.active.accent {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  background: var(--accent-wash-2);
+}
+
+.active.neutral {
+  color: var(--text);
+  border-color: var(--accent-dim);
+}
+
+.active.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-wash);
+}
+
+/* --- disabled --- */
+
+.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

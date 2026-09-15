@@ -1,0 +1,108 @@
+.hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-6) var(--space-6);
+  background:
+    linear-gradient(180deg, var(--accent-wash-1), transparent 70%),
+    var(--bg-raised);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: var(--space-1);
+}
+
+.labelIdle {
+  composes: label;
+  color: var(--text-faint);
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artist {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress {
+  margin-top: var(--space-2);
+}
+
+.progressClocks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.addedBy {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.controls {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.emptyState {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.emptyArt {
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  flex-shrink: 0;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.emptySubtitle {
+  margin: var(--space-1) 0 0;
+  font-size: 13px;
+  color: var(--text-faint);
+}

@@ -1,0 +1,51 @@
+.base {
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+/* --- padding scale --- */
+
+.sm {
+  padding: var(--space-2);
+}
+
+.md {
+  padding: var(--space-3);
+}
+
+.lg {
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+}
+
+/* --- tone --- */
+
+.raised {
+  border-color: var(--accent-dim);
+}
+
+/* --- interactive --- */
+
+.interactive {
+  cursor: pointer;
+  transition:
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.interactive:hover {
+  border-color: var(--accent-dim);
+}
+
+/* --- selected --- */
+
+.selected {
+  border-color: var(--accent);
+}
+
+/* selection on an already-raised card intensifies rather than repeats. */
+.raised.selected {
+  border-color: var(--accent);
+  background: var(--bg-card-hover);
+}

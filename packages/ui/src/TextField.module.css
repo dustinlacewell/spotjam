@@ -1,0 +1,57 @@
+.base {
+  width: 100%;
+  font-family: inherit;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--dur) var(--ease);
+}
+
+.base::placeholder {
+  color: var(--text-faint);
+}
+
+.base:focus {
+  border-color: var(--accent-dim);
+  box-shadow: var(--shadow-glow);
+}
+
+/* Always-on accent border: a live-editing affordance, independent of focus. */
+.emphasis {
+  border-color: var(--accent-dim);
+  box-shadow: var(--shadow-glow);
+}
+
+.base:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- size scale (padding + font-size) --- */
+
+.lg {
+  padding: 14px var(--space-4);
+  font-size: var(--text-lg);
+}
+
+.md {
+  padding: 10px var(--space-3);
+  font-size: var(--text-md);
+}
+
+/* sm resolves to exactly 34px total height:
+   7px + 7px padding + 18px line-box + 2px border = 34px,
+   matching Button's sm height. */
+.sm {
+  padding: 7px var(--space-3);
+  font-size: var(--text-md);
+  line-height: 18px;
+}
+
+/* --- alignment --- */
+
+.center {
+  text-align: center;
+}

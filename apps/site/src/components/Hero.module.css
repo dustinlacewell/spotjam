@@ -1,0 +1,39 @@
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--space-7) var(--space-4) var(--space-6);
+}
+
+.mark {
+  margin-bottom: var(--space-5);
+}
+
+.headline {
+  margin: 0;
+  font-size: var(--text-hero);
+  font-weight: 800;
+  letter-spacing: var(--tracking-tighter);
+  max-width: 720px;
+}
+
+.subhead {
+  margin: var(--space-4) 0 0;
+  max-width: 520px;
+  color: var(--text-dim);
+  font-size: var(--text-xl);
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.platforms {
+  margin: var(--space-4) 0 0;
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+}

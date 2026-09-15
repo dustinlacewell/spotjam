@@ -1,0 +1,101 @@
+.base {
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  line-height: 1;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease),
+    visibility var(--dur) var(--ease);
+}
+
+/* --- shape --- */
+
+.square {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.circle {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-circle);
+}
+
+/* --- size (shape-dependent) --- */
+
+.square.md {
+  width: 30px;
+  height: 30px;
+}
+
+.square.sm {
+  width: 24px;
+  height: 24px;
+}
+
+.circle.md {
+  width: 44px;
+  height: 44px;
+}
+
+.circle.sm {
+  width: 24px;
+  height: 24px;
+}
+
+/* --- tone --- */
+
+.neutral {
+  color: var(--text-faint);
+}
+
+.neutral:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-wash-3);
+}
+
+.accent {
+  color: var(--accent);
+}
+
+.accent:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-wash-3);
+}
+
+.danger {
+  color: var(--text-faint);
+}
+
+.danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-wash);
+}
+
+/* --- disabled --- */
+
+.base:disabled {
+  color: var(--text-faint);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- reveal-on-hover ---
+   Hidden by default. The consuming app reveals it from a parent hover:
+   .card:hover [data-ui-reveal] { opacity: 1; visibility: visible; } */
+
+.base[data-ui-reveal] {
+  opacity: 0;
+  visibility: hidden;
+}

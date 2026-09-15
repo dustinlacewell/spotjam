@@ -38,17 +38,18 @@ import {
   usernameOf,
   type ConnectionStatus,
   type Progress,
+  type Room,
   type RoomError,
   type RoomView,
-} from "./room-client";
+} from "@spotjam/room";
 
 export type {
   ConnectionStatus,
   Progress,
   RoomError,
   SocketPhase,
-} from "./room-client";
-export { toQueueItems } from "./room-client";
+} from "@spotjam/room";
+export { toQueueItems } from "@spotjam/room";
 export type {
   Participant,
   PlaybackPointer,
@@ -66,7 +67,7 @@ export { Connection, DEFAULT_SERVER_URL } from "./connection";
  * the snapshot the server broadcasts back. Nothing is applied locally first,
  * so the UI can never disagree with the server about what happened.
  */
-export class RoomClient {
+export class RoomClient implements Room {
   readonly roomId: string;
   readonly myPubkey: PublicKeyHex;
 

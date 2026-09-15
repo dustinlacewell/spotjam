@@ -1,0 +1,20 @@
+.base {
+  display: inline-block;
+  min-width: 0;
+  padding: 4px 10px;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  background: var(--bg-raised);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.muted {
+  color: var(--text-faint);
+}
+
+.accent {
+  color: var(--accent);
+}

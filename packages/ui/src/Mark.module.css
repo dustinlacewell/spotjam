@@ -1,0 +1,39 @@
+.base {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 800;
+}
+
+.lg {
+  font-size: var(--text-3xl);
+  letter-spacing: var(--tracking-tighter);
+}
+
+.md {
+  font-size: var(--text-2xl);
+  letter-spacing: var(--tracking-tighter);
+}
+
+.sm {
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-dim);
+}
+
+.dot {
+  flex-shrink: 0;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.dotLg {
+  width: 10px;
+  height: 10px;
+}
+
+.dotMd {
+  width: 9px;
+  height: 9px;
+}

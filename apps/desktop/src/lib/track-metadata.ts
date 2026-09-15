@@ -1,10 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { TrackInfo, TrackMetadataSource } from "@spotjam/room";
 
-export interface TrackMetadata {
-  title: string;
-  artist: string;
-  thumbnailUrl: string | null;
-}
+/** The desktop app's name for the port's TrackInfo. */
+export type TrackMetadata = TrackInfo;
 
 interface RustTrackMetadata {
   title: string;
@@ -38,3 +36,6 @@ export function getTrackMetadata(trackUri: string): Promise<TrackMetadata | null
   cache.set(trackUri, promise);
   return promise;
 }
+
+/** The Tauri-backed adapter the app hands to @spotjam/room. */
+export const tauriTrackMetadata: TrackMetadataSource = { resolve: getTrackMetadata };

@@ -1,0 +1,61 @@
+.base {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  /* transparent by default so the outline selection style can add a
+     visible border without shifting the row's layout. */
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.base:hover {
+  background: var(--bg-card-hover);
+  color: var(--text);
+}
+
+/* --- layout --- */
+
+.grid {
+  display: grid;
+}
+
+/* --- button reset (as="button") --- */
+
+.button {
+  font-family: inherit;
+  font-weight: inherit;
+  text-align: left;
+  background: none;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* --- selection styles --- */
+
+.subtle {
+  background: var(--bg-card-hover);
+  color: var(--text);
+}
+
+.fill,
+.fill:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.outline,
+.outline:hover {
+  border-color: var(--accent);
+  background: var(--bg-card);
+  color: var(--text);
+}

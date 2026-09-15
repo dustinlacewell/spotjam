@@ -1,0 +1,46 @@
+.track {
+  position: relative;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-card-hover);
+  cursor: default;
+}
+
+.seekable {
+  cursor: pointer;
+}
+
+.fill {
+  position: relative;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+}
+
+.knob {
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.seekable:hover .knob,
+.seekable:focus .knob,
+.seekable:focus-visible .knob {
+  opacity: 1;
+}
+
+.labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}

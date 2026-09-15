@@ -1,0 +1,19 @@
+.base {
+  margin: 4px 0 0;
+  font-size: var(--text-2xs);
+  line-height: 16px;
+}
+
+/* Holds the layout slot when children are empty, so whatever sits
+   below does not jump as the hint fills and clears. */
+.reserve {
+  min-height: 16px;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.muted {
+  color: var(--text-faint);
+}
