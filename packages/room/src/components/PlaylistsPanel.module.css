@@ -77,6 +77,15 @@
   width: 24px;
 }
 
+/* The two ways to make a playlist, pinned under the list. */
+.listActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
 /* ---- right column: the selected playlist's tracks ---- */
 
 .tracksColumn {

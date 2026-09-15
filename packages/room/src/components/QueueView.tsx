@@ -21,6 +21,8 @@ import { PlaylistsProvider } from "./playlists-context";
 import { NowPlaying } from "./NowPlaying";
 import { BroadcastToggle } from "./BroadcastToggle";
 import { DetailPane } from "./DetailPane";
+import { ImportChoiceModal } from "./ImportChoiceModal";
+import { LinkPlaylistModal } from "./LinkPlaylistModal";
 import { QueueTracks, type QueueSource } from "./QueueTracks";
 import { QUEUE_PANE, type PaneSelection } from "./pane-selection";
 import { Sidebar, type Selection } from "./Sidebar";
@@ -52,26 +54,45 @@ export function QueueView({
 
   const { importStatus, startImports } = usePlaylistImport();
 
-  // A playlist link dropped on the playlist list, or on another playlist's
-  // pane, has one sane meaning: it becomes a new playlist, which then takes
-  // over the view.
-  //
-  // It stays linked to the Spotify playlist it came from: Spotify keeps
-  // owning the content, and syncing pulls later changes in.
-  const importAsNewPlaylist = useCallback(
+  // A playlist link becomes a new playlist, which then takes over the view.
+  // Copying takes the tracks and forgets where they came from; linking keeps
+  // the tie, so Spotify goes on owning the content and a sync pulls its
+  // changes in. Which one a drop means is the user's call, not ours.
+  const openImported = useCallback(
+    (id: string) => {
+      setSelection(myPubkey);
+      setPane(id);
+    },
+    [myPubkey],
+  );
+
+  const copyAsNewPlaylist = useCallback(
     (playlists: ParsedPlaylist[]) => {
       startImports(playlists, (imported) => {
-        const id = createWithTracks(imported.name, imported.tracks, {
-          kind: "spotify",
-          playlistId: imported.playlistId,
-          syncedAt: Date.now(),
-        });
-        setSelection(myPubkey);
-        setPane(id);
+        openImported(createWithTracks(imported.name, imported.tracks));
       });
     },
-    [startImports, createWithTracks, myPubkey],
+    [startImports, createWithTracks, openImported],
   );
+
+  const linkAsNewPlaylist = useCallback(
+    (playlists: ParsedPlaylist[]) => {
+      startImports(playlists, (imported) => {
+        openImported(
+          createWithTracks(imported.name, imported.tracks, {
+            kind: "spotify",
+            playlistId: imported.playlistId,
+            syncedAt: Date.now(),
+          }),
+        );
+      });
+    },
+    [startImports, createWithTracks, openImported],
+  );
+
+  // A drop on the playlist list asks first; the button links outright.
+  const [pendingImport, setPendingImport] = useState<ParsedPlaylist[] | null>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
 
   usePublishedPlaylists(room, playlistsApi.playlists, status.synced);
 
@@ -113,7 +134,8 @@ export function QueueView({
   /**
    * A playlist link dropped on the queue has a different meaning than one
    * dropped on the playlist list: its tracks join the queue directly, rather
-   * than becoming a new local playlist.
+   * than becoming a playlist. Nothing is stored, so there is nothing to link
+   * and nothing to ask about.
    */
   function importIntoQueue(playlists: ParsedPlaylist[]) {
     startImports(playlists, (imported) => appendTracks(imported.tracks));
@@ -207,8 +229,9 @@ export function QueueView({
               onAddToQueue={appendTracks}
               onReplaceQueue={(tracks) => room.replaceMyQueue(toQueueItems(tracks))}
               onQueueLinks={(links) => handleLinks(links, appendTracks, importIntoQueue)}
-              onLinks={(links, onTracks) => handleLinks(links, onTracks, importAsNewPlaylist)}
-              onImportPlaylists={importAsNewPlaylist}
+              onLinks={(links, onTracks) => handleLinks(links, onTracks, setPendingImport)}
+              onLinkPlaylist={() => setLinkOpen(true)}
+              onImportPlaylists={setPendingImport}
               onMoveMany={(itemIds, beforeItemId) => room.moveManyInMyQueue(itemIds, beforeItemId)}
               onSendToTop={(itemId) => room.sendToTopOfMyQueue(itemId)}
               onRemove={(itemId) => room.removeFromMyQueue(itemId)}
@@ -219,6 +242,18 @@ export function QueueView({
           )}
         </main>
       </div>
+
+      <ImportChoiceModal
+        playlists={pendingImport}
+        onClose={() => setPendingImport(null)}
+        onCopy={copyAsNewPlaylist}
+        onLink={linkAsNewPlaylist}
+      />
+      <LinkPlaylistModal
+        open={linkOpen}
+        onClose={() => setLinkOpen(false)}
+        onLink={linkAsNewPlaylist}
+      />
     </div>
     </PlaylistsProvider>
   );

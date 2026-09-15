@@ -42,4 +42,7 @@ export { EngravedText } from "./EngravedText";
 export { ContextMenu, ContextMenuItem } from "./ContextMenu";
 export type { ContextMenuProps, ContextMenuItemProps } from "./ContextMenu";
 
+export { Modal } from "./Modal";
+export type { ModalProps } from "./Modal";
+
 export type { Point } from "./context-menu-layout";

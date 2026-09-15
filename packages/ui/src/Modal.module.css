@@ -1,0 +1,43 @@
+/*
+ * Sits above the context menu layer: a modal opened from a menu must cover it.
+ */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: rgb(0 0 0 / 0.55);
+}
+
+.dialog {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 420px;
+  max-height: calc(100vh - 2 * var(--space-6));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, var(--radius-sm));
+  box-shadow: var(--shadow-raised);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-md, 15px);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Right-aligned, so the confirming action sits where the eye leaves the body. */
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

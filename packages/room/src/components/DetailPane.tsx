@@ -25,6 +25,7 @@ export function DetailPane({
   onReplaceQueue,
   onQueueLinks,
   onLinks,
+  onLinkPlaylist,
   onImportPlaylists,
   onMoveMany,
   onSendToTop,
@@ -44,7 +45,9 @@ export function DetailPane({
   onQueueLinks: (links: ParsedLinks) => void;
   /** Tracks land in the open playlist; playlist links import as new playlists. */
   onLinks: (links: ParsedLinks, onTracks: (tracks: ParsedTrack[]) => void) => void;
-  /** A playlist link dropped on the playlist list imports it as a new playlist. */
+  /** Opens the dialog that links a Spotify playlist. */
+  onLinkPlaylist: () => void;
+  /** A playlist link dropped on the playlist list asks whether to copy or link it. */
   onImportPlaylists: (playlists: ParsedPlaylist[]) => void;
   onMoveMany: (itemIds: string[], beforeItemId: string | null) => void;
   onSendToTop: (itemId: string) => void;
@@ -130,6 +133,7 @@ export function DetailPane({
           if (id === renamingId) setRenamingId(null);
         }}
         onCreate={handleCreate}
+        onLinkPlaylist={onLinkPlaylist}
         onImportPlaylists={onImportPlaylists}
       />
 

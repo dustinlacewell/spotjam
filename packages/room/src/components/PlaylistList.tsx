@@ -19,6 +19,7 @@ export function PlaylistList({
   onCancelRename,
   onDelete,
   onCreate,
+  onLinkPlaylist,
   onImportPlaylists,
 }: {
   playlists: Playlist[];
@@ -36,7 +37,9 @@ export function PlaylistList({
   onCancelRename: () => void;
   onDelete: (id: string) => void;
   onCreate: () => void;
-  /** A playlist link dropped anywhere on this list imports it as a new playlist. */
+  /** Opens the dialog that links a Spotify playlist. */
+  onLinkPlaylist: () => void;
+  /** A playlist link dropped anywhere on this list asks whether to copy or link it. */
   onImportPlaylists: (playlists: ParsedPlaylist[]) => void;
 }) {
   const listBody = (
@@ -98,9 +101,14 @@ export function PlaylistList({
       </ul>
 
       {!readOnly && (
-        <Button variant="ghost" size="sm" onClick={onCreate}>
-          + New playlist
-        </Button>
+        <div className={styles.listActions}>
+          <Button variant="ghost" size="sm" onClick={onCreate}>
+            + New playlist
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onLinkPlaylist}>
+            Link playlist
+          </Button>
+        </div>
       )}
     </>
   );

@@ -4,8 +4,18 @@ A linked playlist is a local playlist whose content comes from a Spotify
 playlist. Spotify owns the content. Spotjam reads it and does not edit it. You
 edit it in Spotify and sync.
 
-Dropping or pasting a playlist link creates one. It stays linked to the
-playlist it came from.
+## Making one
+
+**Link playlist**, under the playlist list, opens a dialog that takes a pasted
+or dropped playlist link and links it.
+
+**Dropping a playlist link on the list** asks first: copy or link. A copy takes
+the tracks and forgets where they came from — an ordinary editable playlist. A
+link keeps the tie. Only the user knows which one a drop meant, so spotjam does
+not guess.
+
+A playlist link dropped on a **queue** still just queues its tracks. Nothing is
+stored, so there is nothing to link and nothing to ask.
 
 ## The source
 
