@@ -229,6 +229,26 @@ describe("rooms", () => {
     expect(rooms.has("jam")).toBe(false);
   });
 
+  it("starts playing once a member queues a track and broadcasts", () => {
+    const { socket, connection } = authed();
+    send(connection, { type: "join-room", roomId: "jam" });
+    send(connection, {
+      type: "enqueue",
+      roomId: "jam",
+      items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1" }],
+    });
+    send(connection, { type: "set-broadcasting", roomId: "jam", broadcasting: true });
+
+    const event = lastEvent(socket);
+    expect(event.type).toBe("room-state");
+    if (event.type !== "room-state") return;
+    expect(event.snapshot.pointer).toMatchObject({
+      itemId: "a1",
+      ownerPubkey: alice.publicKey,
+      uri: "spotify:track:a1",
+    });
+  });
+
   it("rejects an op signed by a key other than the session's", () => {
     const { socket, connection } = authed();
     send(connection, { type: "join-room", roomId: "jam" });
@@ -236,5 +256,254 @@ describe("rooms", () => {
 
     send(connection, { type: "clear-queue", roomId: "jam" }, bob);
     expect(lastEvent(socket)).toMatchObject({ type: "error", code: "unknown-identity" });
+  });
+});
+
+describe("queries", () => {
+  function authed(identity = alice, username = "alice") {
+    const { socket, connection } = connect();
+    send(connection, { type: "register", username }, identity);
+    socket.clear();
+    return { socket, connection };
+  }
+
+  /** Put a broadcasting alice with one playing track into "jam". */
+  function playingRoom() {
+    const a = authed(alice, "alice");
+    send(a.connection, { type: "join-room", roomId: "jam" });
+    send(a.connection, {
+      type: "enqueue",
+      roomId: "jam",
+      items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1" }],
+    });
+    // Broadcasting with a track queued starts playback; no kickoff skip needed.
+    send(a.connection, { type: "set-broadcasting", roomId: "jam", broadcasting: true });
+    return a;
+  }
+
+  it("refuses a query before authentication", () => {
+    const { socket, connection } = connect();
+    send(connection, { type: "watch-rooms" });
+
+    expect(lastEvent(socket)).toMatchObject({ type: "error", code: "unknown-identity" });
+  });
+
+  it("rejects a room-scoped query with no room id", () => {
+    const { socket, connection } = authed();
+    send(connection, { type: "watch-room", roomId: "" });
+
+    expect(lastEvent(socket)).toMatchObject({ type: "error", code: "malformed" });
+  });
+
+  describe("watch-rooms", () => {
+    it("answers at once with the current list", () => {
+      const { socket, connection } = authed();
+      send(connection, { type: "watch-rooms" });
+
+      expect(lastEvent(socket)).toEqual({ type: "room-list", rooms: [] });
+    });
+
+    it("reports a live room's listener count and current track", () => {
+      playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-rooms" }, bob);
+
+      expect(lastEvent(watcher.socket)).toEqual({
+        type: "room-list",
+        rooms: [
+          {
+            roomId: "jam",
+            listeners: 1,
+            trackUri: "spotify:track:a1",
+            createdAtEpochMs: clock.now(),
+          },
+        ],
+      });
+    });
+
+    it("pushes a new list when someone joins another room", () => {
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-rooms" }, bob);
+      watcher.socket.clear();
+
+      const joiner = authed(alice, "alice");
+      send(joiner.connection, { type: "join-room", roomId: "jam" });
+
+      expect(lastEvent(watcher.socket)).toEqual({
+        type: "room-list",
+        rooms: [
+          { roomId: "jam", listeners: 1, trackUri: null, createdAtEpochMs: clock.now() },
+        ],
+      });
+    });
+
+    it("pushes nothing when only playback progress moved", () => {
+      const player = playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-rooms" }, bob);
+      watcher.socket.clear();
+
+      clock.advance(1_000);
+      send(player.connection, {
+        type: "report-progress",
+        roomId: "jam",
+        itemId: "a1",
+        positionMs: 1_000,
+        durationMs: 200_000,
+        sampledAtEpochMs: clock.now(),
+      });
+
+      expect(watcher.socket.sent).toHaveLength(0);
+    });
+
+    it("stops pushing after unwatch-rooms", () => {
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-rooms" }, bob);
+      send(watcher.connection, { type: "unwatch-rooms" }, bob);
+      watcher.socket.clear();
+
+      const joiner = authed(alice, "alice");
+      send(joiner.connection, { type: "join-room", roomId: "jam" });
+
+      expect(watcher.socket.sent).toHaveLength(0);
+    });
+
+    it("pushes a list without a room that just went deserted", () => {
+      const joiner = authed(alice, "alice");
+      send(joiner.connection, { type: "join-room", roomId: "jam" });
+
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-rooms" }, bob);
+      watcher.socket.clear();
+
+      send(joiner.connection, { type: "leave-room", roomId: "jam" });
+
+      expect(lastEvent(watcher.socket)).toEqual({ type: "room-list", rooms: [] });
+    });
+
+    it("stops pushing to a closed connection", () => {
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-rooms" }, bob);
+      session.close(watcher.connection);
+      watcher.socket.clear();
+
+      const joiner = authed(alice, "alice");
+      send(joiner.connection, { type: "join-room", roomId: "jam" });
+
+      expect(watcher.socket.sent).toHaveLength(0);
+    });
+  });
+
+  describe("watch-room", () => {
+    it("answers at once with a snapshot and an empty myQueue", () => {
+      playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-room", roomId: "jam" }, bob);
+
+      const event = lastEvent(watcher.socket);
+      expect(event.type).toBe("room-detail");
+      if (event.type !== "room-detail") return;
+      expect(event.snapshot.roomId).toBe("jam");
+      expect(event.snapshot.participants).toHaveLength(1);
+      expect(event.snapshot.myQueue).toEqual([]);
+      expect(event.snapshot.pointer.uri).toBe("spotify:track:a1");
+    });
+
+    it("does not put the watcher in the room", () => {
+      playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-room", roomId: "jam" }, bob);
+
+      expect(watcher.connection.roomId).toBeNull();
+      expect(rooms.get("jam").members.size).toBe(1);
+    });
+
+    it("pushes a snapshot when the watched room changes", () => {
+      const player = playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-room", roomId: "jam" }, bob);
+      watcher.socket.clear();
+
+      send(player.connection, {
+        type: "enqueue",
+        roomId: "jam",
+        items: [{ id: "a2", uri: "spotify:track:a2", trackId: "a2" }],
+      });
+
+      const event = lastEvent(watcher.socket);
+      expect(event.type).toBe("room-detail");
+      if (event.type !== "room-detail") return;
+      expect(event.snapshot.sessionQueue.map((entry) => entry.item.id)).toEqual(["a2"]);
+    });
+
+    it("pushes progress-only changes too", () => {
+      const player = playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-room", roomId: "jam" }, bob);
+      watcher.socket.clear();
+
+      clock.advance(1_000);
+      send(player.connection, {
+        type: "report-progress",
+        roomId: "jam",
+        itemId: "a1",
+        positionMs: 1_000,
+        durationMs: 200_000,
+        sampledAtEpochMs: clock.now(),
+      });
+
+      const event = lastEvent(watcher.socket);
+      expect(event.type).toBe("room-detail");
+      if (event.type !== "room-detail") return;
+      expect(event.snapshot.progress?.positionMs).toBe(1_000);
+    });
+
+    it("watches one room at a time", () => {
+      const player = playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-room", roomId: "jam" }, bob);
+      send(watcher.connection, { type: "watch-room", roomId: "other" }, bob);
+      watcher.socket.clear();
+
+      send(player.connection, { type: "clear-queue", roomId: "jam" });
+
+      expect(watcher.socket.sent).toHaveLength(0);
+    });
+
+    it("stops pushing after unwatch-room", () => {
+      const player = playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-room", roomId: "jam" }, bob);
+      send(watcher.connection, { type: "unwatch-room", roomId: "jam" }, bob);
+      watcher.socket.clear();
+
+      send(player.connection, { type: "clear-queue", roomId: "jam" });
+
+      expect(watcher.socket.sent).toHaveLength(0);
+    });
+
+    it("ignores unwatch-room for a room it is not watching", () => {
+      const player = playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-room", roomId: "jam" }, bob);
+      send(watcher.connection, { type: "unwatch-room", roomId: "elsewhere" }, bob);
+      watcher.socket.clear();
+
+      send(player.connection, { type: "clear-queue", roomId: "jam" });
+
+      expect(lastEvent(watcher.socket)).toMatchObject({ type: "room-detail" });
+    });
+
+    it("stops pushing to a closed connection", () => {
+      const player = playingRoom();
+      const watcher = authed(bob, "bob");
+      send(watcher.connection, { type: "watch-room", roomId: "jam" }, bob);
+      session.close(watcher.connection);
+      watcher.socket.clear();
+
+      send(player.connection, { type: "clear-queue", roomId: "jam" });
+
+      expect(watcher.socket.sent).toHaveLength(0);
+    });
   });
 });

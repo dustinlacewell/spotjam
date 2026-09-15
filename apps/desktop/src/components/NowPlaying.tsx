@@ -29,8 +29,8 @@ export function NowPlaying({
         <div className={styles.emptyState}>
           <div className={styles.emptyArt} />
           <div>
-            <p className={styles.emptyTitle}>Nothing queued yet</p>
-            <p className={styles.emptySubtitle}>Paste a Spotify link below to start the session</p>
+            <p className={styles.emptyTitle}>Empty Queue</p>
+            <p className={styles.emptySubtitle}>Add a song to the queue!</p>
           </div>
         </div>
       </div>

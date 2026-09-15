@@ -1,16 +1,18 @@
-// RoomClient — the socket shell around the pure core in room-client.ts.
+// RoomClient — one joined room, layered on a shared Connection.
 //
-// All the I/O lives here: the WebSocket, the reconnect timer, and the calls to
-// the Rust signer. Every decision — which op a gesture becomes, what an event
-// does to the view — belongs to room-client.ts, so this file stays a sequence
-// of named steps with no logic of its own.
+// All the socket I/O — the WebSocket, the reconnect timer, the handshake —
+// lives in Connection, which the app builds once and keeps for as long as it
+// runs. This class only tracks membership in one room: it asks the shared
+// connection to join, filters the connection's events down to this room's
+// snapshots, and turns method calls into signed ops. Every decision — which
+// op a gesture becomes, what an event does to the view — belongs to
+// room-client.ts, so this file stays a sequence of named steps with no logic
+// of its own.
 //
 // The server owns room state. This class sends signed ops and renders whatever
 // snapshot comes back; it derives nothing.
 
 import type {
-  AuthPayload,
-  Envelope,
   Op,
   Participant,
   PlaybackPointer,
@@ -20,23 +22,18 @@ import type {
   ServerEvent,
   SessionEntry,
 } from "@spotjam/protocol";
-import type { CanonicalValue } from "@spotjam/protocol";
 
-import { IdentityClient, identityClient } from "./identity";
+import type { Connection } from "./connection";
 import {
   INITIAL_VIEW,
-  backoffMs,
-  helloPayload,
   isBroadcasting,
   myQueueOf,
   ops,
-  parseServerEvent,
   participantsOf,
   pointerOf,
   progressOf,
   queueOf,
   reduce,
-  registerPayload,
   sessionQueueOf,
   usernameOf,
   type ConnectionStatus,
@@ -59,42 +56,11 @@ export type {
   RoomSnapshot,
   SessionEntry,
 } from "@spotjam/protocol";
+export type { SocketLike, SocketFactory, ConnectionOptions } from "./connection";
+export { Connection, DEFAULT_SERVER_URL } from "./connection";
 
 /**
- * The deployed relay host. The spotjam server takes this hostname over from
- * the old Yjs relay, so existing installs keep working without a new address.
- */
-export const DEFAULT_SERVER_URL = "wss://yjs.ldlework.com";
-
-/** The socket surface this class needs. The browser's WebSocket satisfies it. */
-export interface SocketLike {
-  send(data: string): void;
-  close(): void;
-  onopen: ((event: unknown) => void) | null;
-  onclose: ((event: unknown) => void) | null;
-  onerror: ((event: unknown) => void) | null;
-  onmessage: ((event: { data: unknown }) => void) | null;
-}
-
-export type SocketFactory = (url: string) => SocketLike;
-
-export interface RoomOptions {
-  /** Overridden in tests; defaults to the real WebSocket. */
-  socketFactory?: SocketFactory;
-  url?: string;
-  identity?: IdentityClient;
-  /** Injected so tests need no real timers for backoff. */
-  setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
-  clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
-  now?: () => number;
-}
-
-function defaultSocketFactory(url: string): SocketLike {
-  return new WebSocket(url) as unknown as SocketLike;
-}
-
-/**
- * A joined room, backed by the spotjam server.
+ * A joined room, backed by a shared Connection.
  *
  * Mutating methods are fire-and-forget: they sign an op, send it, and wait for
  * the snapshot the server broadcasts back. Nothing is applied locally first,
@@ -105,247 +71,98 @@ export class RoomClient {
   readonly myPubkey: PublicKeyHex;
 
   #view: RoomView = INITIAL_VIEW;
-  #socket: SocketLike | null = null;
-  #reconnectAttempt = 0;
-  #reconnectHandle: ReturnType<typeof setTimeout> | null = null;
   #closed = false;
-  /** Bumped per connection so a late reply from a dead socket is ignored. */
-  #generation = 0;
-  /**
-   * How far this connection's greeting has got. Reset on every reconnect.
-   *
-   * `failed` is terminal for the connection: the server refused the name, and
-   * sending it again would only earn the same refusal.
-   */
-  #handshake: "greeting" | "registering" | "done" | "failed" = "greeting";
   /**
    * Our own sample of the local player. Used only until the server echoes a
    * sample back, which it does whenever this client is the broadcaster.
    */
   #myProgress: Progress | null = null;
 
-  readonly #username: string;
-  readonly #url: string;
-  readonly #identity: IdentityClient;
-  readonly #socketFactory: SocketFactory;
-  readonly #setTimer: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
-  readonly #clearTimer: (handle: ReturnType<typeof setTimeout>) => void;
-  readonly #now: () => number;
+  readonly #connection: Connection;
+  readonly #unsubscribeEvent: () => void;
+  readonly #unsubscribeReady: () => void;
+  readonly #unsubscribeStatus: () => void;
 
   readonly #statusListeners = new Set<(status: ConnectionStatus) => void>();
   readonly #changeListeners = new Set<() => void>();
 
-  constructor(
-    roomId: string,
-    identity: { publicKey: PublicKeyHex; username: string },
-    options: RoomOptions = {},
-  ) {
+  constructor(connection: Connection, roomId: string) {
     this.roomId = roomId;
-    this.myPubkey = identity.publicKey;
-    this.#username = identity.username;
-    this.#url = options.url ?? DEFAULT_SERVER_URL;
-    this.#identity = options.identity ?? identityClient;
-    this.#socketFactory = options.socketFactory ?? defaultSocketFactory;
-    this.#setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
-    this.#clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle));
-    this.#now = options.now ?? Date.now;
+    this.myPubkey = connection.myPubkey;
+    this.#connection = connection;
 
-    this.#connect();
+    this.#unsubscribeEvent = connection.onEvent((event) => this.#onEvent(event));
+    this.#unsubscribeReady = connection.onReady(() => this.#join());
+    this.#unsubscribeStatus = connection.onStatus(() => this.#onSocketStatusChange());
+
+    // The connection may already be past its handshake by the time this room
+    // is constructed (a second room joined on an existing session).
+    if (connection.isReady()) this.#join();
+    this.#setSynced(false);
   }
 
-  // --- connection ----------------------------------------------------
+  // --- membership ------------------------------------------------------
 
-  /** Open a socket and wire it. Every reconnect comes back through here. */
-  #connect(): void {
-    if (this.#closed) return;
-    this.#generation += 1;
-    const generation = this.#generation;
-
-    this.#setStatus({ socket: "connecting", synced: false });
-
-    let socket: SocketLike;
-    try {
-      socket = this.#socketFactory(this.#url);
-    } catch (error) {
-      console.error("spotjam: could not open socket", this.#url, error);
-      this.#scheduleReconnect();
-      return;
-    }
-
-    this.#socket = socket;
-    socket.onopen = () => this.#onOpen(generation);
-    socket.onmessage = (event) => this.#onMessage(event.data, generation);
-    socket.onclose = () => this.#onClose(generation);
-    socket.onerror = (event) => {
-      // A socket error is always followed by a close, which is what actually
-      // drives the reconnect. Logging here keeps the cause visible.
-      console.warn("spotjam: websocket error", this.#url, event);
-    };
+  #join(): void {
+    console.info("spotjam: joining", this.roomId);
+    this.#connection.send(ops.joinRoom(this.roomId));
   }
 
-  /**
-   * A fresh connection announces who we are.
-   *
-   * Only the greeting goes out here. What follows depends on the server's
-   * answer, which arrives later over the socket, so the rest of the handshake
-   * is driven from #onMessage rather than guessed at now.
-   */
-  #onOpen(generation: number): void {
-    if (generation !== this.#generation) return;
-    this.#reconnectAttempt = 0;
-    this.#handshake = "greeting";
-    this.#setStatus({ socket: "connected", synced: false });
-    // The handshake has four steps across two processes and a network. Without
-    // a trace of which one it reached, a stall is indistinguishable from every
-    // other stall.
-    console.info("spotjam: socket open", this.#url);
-    void this.#send(helloPayload(), generation);
-  }
+  // --- events ------------------------------------------------------------
 
-  /**
-   * Carry the handshake forward on what the server actually said.
-   *
-   * `registered` means the key is known and the room can be asked for.
-   * `unknown-identity` while greeting means this key has never claimed a name,
-   * so the one stored on this machine is registered and the server answers
-   * with `registered` — which lands back here and does the join.
-   */
-  #advanceHandshake(event: ServerEvent, generation: number): void {
-    if (this.#handshake === "done") return;
-
-    if (event.type === "registered") {
-      this.#handshake = "done";
-      console.info("spotjam: registered, joining", this.roomId);
-      void this.#send(ops.joinRoom(this.roomId), generation);
-      return;
-    }
-
-    if (event.type !== "error") return;
-
-    if (this.#isExpectedGreetingMiss(event)) {
-      this.#handshake = "registering";
-      void this.#send(registerPayload(this.#username), generation);
-      return;
-    }
-
-    // Registration itself was refused -- a name already taken, or one the
-    // server will not accept. Retrying sends the same name to the same answer,
-    // so the handshake stops here and the error stands for the UI to show.
-    // Without this the client would sit in `registering` forever, silently.
-    if (this.#handshake === "registering") {
-      this.#handshake = "failed";
-    }
-  }
-
-  /** The first-connection miss the handshake exists to answer. */
-  #isExpectedGreetingMiss(event: ServerEvent): boolean {
-    return (
-      event.type === "error" &&
-      event.code === "unknown-identity" &&
-      this.#handshake === "greeting"
-    );
-  }
-
-  #onClose(generation: number): void {
-    if (generation !== this.#generation) return;
-    this.#socket = null;
-    this.#setStatus({ socket: "disconnected", synced: false });
-    this.#scheduleReconnect();
-  }
-
-  #scheduleReconnect(): void {
-    if (this.#closed || this.#reconnectHandle !== null) return;
-    const delay = backoffMs(this.#reconnectAttempt);
-    this.#reconnectAttempt += 1;
-    this.#reconnectHandle = this.#setTimer(() => {
-      this.#reconnectHandle = null;
-      this.#connect();
-    }, delay);
-  }
-
-  // --- messages ------------------------------------------------------
-
-  /** A frame from a socket we have already replaced is not this room's news. */
-  #onMessage(data: unknown, generation: number): void {
-    if (generation !== this.#generation) return;
-    if (typeof data !== "string") return;
-    const event = parseServerEvent(data);
-    if (event === null) return;
-
-    // `unknown-identity` while greeting is the handshake working, not failing:
-    // a key registers on its first connection, and #advanceHandshake is about
-    // to do exactly that. Warning here would report every first run as broken.
-    if (event.type === "error" && !this.#isExpectedGreetingMiss(event)) {
-      console.warn("spotjam: server error", event.code, event.message);
-    }
-
-    this.#advanceHandshake(event, generation);
+  /** Only this room's news, filtered out of every event the connection sees. */
+  #onEvent(event: ServerEvent): void {
+    if (event.type === "room-state" && event.snapshot.roomId !== this.roomId) return;
 
     if (event.type === "room-state" && !this.#view.status.synced) {
       console.info("spotjam: first snapshot", event.snapshot.roomId);
     }
 
     const previousStatus = this.#view.status;
-    const next = reduce(this.#view, event);
-    if (next !== this.#view) {
-      this.#view = next;
-      // reduce() flips `synced` when the first snapshot lands, but it only
-      // rewrites the view. Status listeners are a separate channel, so without
-      // this the UI never hears that the room finished joining.
-      if (next.status !== previousStatus) {
-        for (const listener of this.#statusListeners) listener(next.status);
-      }
-      this.#emitChange();
+    const reduced = reduce(this.#view, event);
+    // reduce() only decides `synced`; the socket half always mirrors the
+    // shared connection's own live status, which it does not know about.
+    const socketChanged = previousStatus.socket !== this.#liveSocket();
+    if (reduced === this.#view && !socketChanged) return;
+
+    this.#view = { ...reduced, status: { ...reduced.status, socket: this.#liveSocket() } };
+    // Status listeners are a separate channel from onChange, so without this
+    // the UI never hears that the socket or the room's sync state changed.
+    if (this.#view.status.socket !== previousStatus.socket || this.#view.status.synced !== previousStatus.synced) {
+      for (const listener of this.#statusListeners) listener(this.#view.status);
     }
+    this.#emitChange();
   }
 
   /**
-   * Sign a payload and put it on the wire.
-   *
-   * False means it did not go: the socket died, the generation moved on, or
-   * the signer refused. Callers use that to abandon a stale handshake.
+   * The shared connection's socket dropped or came back. This room was not
+   * necessarily re-joined yet — `onReady` handles that — but the socket half
+   * of the status changed regardless, and a snapshot is no longer current
+   * once the socket is gone.
    */
-  async #send(payload: Op | AuthPayload, generation: number): Promise<boolean> {
-    if (generation !== this.#generation) return false;
-
-    let envelope: Envelope<CanonicalValue>;
-    try {
-      // Ops and auth payloads are declared as interfaces, which carry no index
-      // signature, so TypeScript will not widen them to CanonicalValue. They
-      // are plain JSON of exactly that shape; the protocol's own `seal` signs
-      // the same values on the server side.
-      const value = payload as unknown as CanonicalValue;
-      envelope = await this.#identity.seal(value, this.myPubkey, this.#now());
-    } catch (error) {
-      console.error("spotjam: could not sign message", error);
-      return false;
-    }
-
-    // Signing is async, so the socket may have gone while we waited.
-    if (generation !== this.#generation) return false;
-    const socket = this.#socket;
-    if (socket === null) return false;
-
-    try {
-      socket.send(JSON.stringify(envelope));
-      return true;
-    } catch (error) {
-      console.warn("spotjam: could not send message", error);
-      return false;
-    }
+  #onSocketStatusChange(): void {
+    this.#setSynced(this.#connection.getStatus().socket === "disconnected" ? false : this.#view.status.synced);
   }
 
-  /** Fire an op at the current connection. */
-  #sendOp(op: Op): void {
-    void this.#send(op, this.#generation);
+  #liveSocket(): ConnectionStatus["socket"] {
+    return this.#connection.getStatus().socket;
   }
 
-  // --- subscriptions -------------------------------------------------
-
-  #setStatus(status: ConnectionStatus): void {
+  #setSynced(synced: boolean): void {
+    const status: ConnectionStatus = { socket: this.#liveSocket(), synced };
+    if (status.socket === this.#view.status.socket && status.synced === this.#view.status.synced) {
+      return;
+    }
     this.#view = { ...this.#view, status };
     for (const listener of this.#statusListeners) listener(status);
   }
+
+  /** Fire an op at the shared connection. */
+  #sendOp(op: Op): void {
+    this.#connection.send(op);
+  }
+
+  // --- subscriptions -------------------------------------------------
 
   #emitChange(): void {
     for (const listener of this.#changeListeners) listener();
@@ -492,26 +309,18 @@ export class RoomClient {
 
   // --- teardown ------------------------------------------------------
 
+  /**
+   * Leave the room. The shared connection is not this room's to close — it
+   * may back other rooms or the lobby — so only membership and subscriptions
+   * are torn down here.
+   */
   destroy(): void {
+    if (this.#closed) return;
     this.#closed = true;
-    this.#generation += 1;
-    if (this.#reconnectHandle !== null) {
-      this.#clearTimer(this.#reconnectHandle);
-      this.#reconnectHandle = null;
-    }
-    const socket = this.#socket;
-    this.#socket = null;
-    if (socket !== null) {
-      socket.onopen = null;
-      socket.onclose = null;
-      socket.onerror = null;
-      socket.onmessage = null;
-      try {
-        socket.close();
-      } catch {
-        // Already gone. Nothing to release.
-      }
-    }
+    this.#connection.send(ops.leaveRoom(this.roomId));
+    this.#unsubscribeEvent();
+    this.#unsubscribeReady();
+    this.#unsubscribeStatus();
     this.#statusListeners.clear();
     this.#changeListeners.clear();
   }

@@ -44,13 +44,15 @@ function entry(id: string, uri: string): SessionEntry {
  * It serves a snapshot rather than computing one: the server decides the
  * session queue and the pointer, so the fake just hands them over.
  */
-function makeRoom(pointer: PlaybackPointer) {
+function makeRoom(pointer: PlaybackPointer, myPubkey: string = OWNER) {
   const listeners = new Set<() => void>();
   let queue: SessionEntry[] = [entry("i2", NEXT_URI)];
   const fake = {
+    myPubkey,
     sessionQueue: (): SessionEntry[] => queue,
     getPlaybackPointer: () => pointer,
     setMyProgress: vi.fn(),
+    skip: vi.fn(),
     onChange: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -600,6 +602,107 @@ describe("SyncDriver", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(invoke.names()).not.toContain("spotify_seek");
+      driver.stop();
+    });
+  });
+
+  describe("the owner reports the end of its track", () => {
+    const OTHER = "bb".repeat(32);
+
+    /** Spotify sitting on our track, well short of the end. */
+    function onOurTrack(): PlayerState {
+      return {
+        trackUri: URI,
+        trackName: "x",
+        isPaused: false,
+        positionMs: 2000,
+        durationMs: 30_000,
+      };
+    }
+
+    it("skips when the end timer fires", async () => {
+      const room = makeRoom(playingPointer());
+      const invoke = makeInvoke(() => onOurTrack());
+      const driver = startDriver(room, invoke);
+
+      await pollTimes(1); // schedules the end for EPOCH + 31_500
+      await vi.advanceTimersByTimeAsync(29_500);
+
+      expect(room.skip).toHaveBeenCalledTimes(1);
+      driver.stop();
+    });
+
+    it("skips when Spotify transitions into the queued track", async () => {
+      const room = makeRoom(playingPointer());
+      let state = onOurTrack();
+      const invoke = makeInvoke(() => state);
+      const driver = startDriver(room, invoke);
+
+      await pollTimes(1); // observedOnTrack = true
+      state = { ...state, trackUri: NEXT_URI, positionMs: 800 };
+      await pollTimes(1);
+
+      expect(room.skip).toHaveBeenCalledTimes(1);
+      driver.stop();
+    });
+
+    it("skips when the player parks at the very end of the track", async () => {
+      const room = makeRoom(playingPointer());
+      let state = onOurTrack();
+      const invoke = makeInvoke(() => state);
+      const driver = startDriver(room, invoke);
+
+      await pollTimes(1); // observedOnTrack = true
+      state = { ...state, isPaused: true, positionMs: 30_000 };
+      await pollTimes(1);
+
+      expect(room.skip).toHaveBeenCalledTimes(1);
+      driver.stop();
+    });
+
+    it("stays quiet when somebody else owns the item", async () => {
+      const room = makeRoom(playingPointer(), OTHER);
+      const invoke = makeInvoke(() => onOurTrack());
+      const driver = startDriver(room, invoke);
+
+      await pollTimes(1);
+      await vi.advanceTimersByTimeAsync(29_500);
+
+      expect(room.skip).not.toHaveBeenCalled();
+      driver.stop();
+    });
+
+    it("skips an item only once, however often its end is seen", async () => {
+      const room = makeRoom(playingPointer());
+      const invoke = makeInvoke(() => onOurTrack());
+      const driver = startDriver(room, invoke);
+
+      await pollTimes(1);
+      await vi.advanceTimersByTimeAsync(29_500); // the end timer fires
+      await pollTimes(3); // and the poll keeps seeing a finished track
+
+      expect(room.skip).toHaveBeenCalledTimes(1);
+      driver.stop();
+    });
+
+    it("skips again once the pointer moves to a new item that ends", async () => {
+      const room = makeRoom(playingPointer());
+      const invoke = makeInvoke(() => onOurTrack());
+      const driver = startDriver(room, invoke);
+
+      await pollTimes(1);
+      await vi.advanceTimersByTimeAsync(29_500);
+      expect(room.skip).toHaveBeenCalledTimes(1);
+
+      // The server consumed the skip and pushed the next item.
+      room.setQueue([]);
+      room.setPointer(playingPointer({ itemId: "i2", startedAtEpochMs: Date.now() }));
+      await vi.advanceTimersByTimeAsync(0);
+
+      await pollTimes(1);
+      await vi.advanceTimersByTimeAsync(29_500);
+
+      expect(room.skip).toHaveBeenCalledTimes(2);
       driver.stop();
     });
   });

@@ -1,16 +1,16 @@
 .bar {
-  padding: var(--space-4) var(--space-6);
-  background: var(--bg-raised);
-  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-4);
 }
 
 .form {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
 }
 
 .input {
   flex: 1;
+  min-width: 0;
   padding: 12px var(--space-4);
   background: var(--bg-card);
   border: 1px solid var(--border);

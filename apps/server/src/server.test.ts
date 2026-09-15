@@ -131,11 +131,16 @@ describe("server", () => {
     const alicesView = expectRoomState(await clientA.next());
     const bobsView = expectRoomState(await clientB.next());
 
-    expect(alicesView.myQueue.map((item) => item.id)).toEqual(["a1"]);
-    // myQueue is per-recipient; the shared session queue is not.
+    // Alice is already broadcasting, so a1 leaves her queue and starts playing.
+    expect(alicesView.myQueue).toEqual([]);
+    expect(alicesView.pointer.itemId).toBe("a1");
+    // The pointer is shared state: Bob sees the same track Alice is feeding.
     expect(bobsView.myQueue).toEqual([]);
-    expect(bobsView.sessionQueue.map((entry) => entry.item.id)).toEqual(["a1"]);
-    expect(bobsView.sessionQueue[0]?.ownerName).toBe("alice");
+    expect(bobsView.pointer).toMatchObject({
+      itemId: "a1",
+      ownerPubkey: alice.publicKey,
+      uri: "spotify:track:a1",
+    });
 
     clientA.close();
     clientB.close();

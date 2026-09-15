@@ -41,15 +41,18 @@ export interface RoomState {
   order: readonly PublicKeyHex[];
   pointer: PlaybackPointer;
   turnCursor: number;
+  /** When this room was first created. Stamped once, by the first join. */
+  createdAtEpochMs: number;
 }
 
-export function emptyRoom(roomId: string): RoomState {
+export function emptyRoom(roomId: string, now: number = 0): RoomState {
   return {
     roomId,
     members: new Map(),
     order: [],
     pointer: NULL_POINTER,
     turnCursor: 0,
+    createdAtEpochMs: now,
   };
 }
 
@@ -228,6 +231,19 @@ export function advance(state: RoomState, now: number): RoomState {
       pausedAtOffsetMs: 0,
     },
   };
+}
+
+/**
+ * Start playback once a broadcaster has something to play.
+ *
+ * The mirror of the private `settlePointer`: that one clears a pointer the room
+ * can no longer justify, this one fills a null pointer the room can now feed.
+ * Nothing else begins playback, so every successful op runs through here.
+ */
+export function settleStart(state: RoomState, now: number): RoomState {
+  if (state.pointer.itemId !== null) return state;
+  if (broadcastersWithTracks(state).length === 0) return state;
+  return advance(state, now);
 }
 
 /**

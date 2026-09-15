@@ -5,13 +5,11 @@ export type Selection = "session" | string;
 
 export function Sidebar({
   participants,
-  myPubkey,
   playingOwnerPubkey,
   selection,
   onSelect,
 }: {
   participants: Participant[];
-  myPubkey: string;
   playingOwnerPubkey: string | null;
   selection: Selection;
   onSelect: (selection: Selection) => void;
@@ -24,7 +22,7 @@ export function Sidebar({
         onClick={() => onSelect("session")}
       >
         <span className={styles.iconSlot} />
-        <span className={styles.name}>Session</span>
+        <span className={styles.name}>Session Queue</span>
       </button>
 
       <div className={styles.divider} />
@@ -40,9 +38,10 @@ export function Sidebar({
               onClick={() => onSelect(participant.pubkey)}
             >
               <span className={styles.iconSlot}>
-                {participant.broadcasting && (
-                  <span className={styles.broadcastDot} title="Broadcasting" />
-                )}
+                <span
+                  className={participant.broadcasting ? styles.broadcastDot : styles.broadcastDotOff}
+                  title={participant.broadcasting ? "Broadcasting" : "Not broadcasting"}
+                />
               </span>
               <span className={styles.name}>{participant.username}</span>
               {participant.pubkey === playingOwnerPubkey && (
@@ -50,7 +49,6 @@ export function Sidebar({
                   ♪
                 </span>
               )}
-              {participant.pubkey === myPubkey && <span className={styles.youTag}>you</span>}
             </button>
           </li>
         ))}

@@ -56,11 +56,11 @@ function sameClock(a: Clock | null, b: Clock): boolean {
  * mirrors pause/resume. Pure glue: the state lives on the server, the clock in
  * `playback-clock`.
  *
- * Advancing is not this class's job. The server owns the pointer and moves it
- * on its own, so where this driver used to elect a peer and call `advance()`,
- * it now does nothing and waits for the next snapshot. Detecting the end of a
- * track still matters — it is what makes the local player stop chasing a track
- * the room has finished — but the decision to move on is the server's.
+ * The server has no clock, so it cannot know a track ran out: something has to
+ * tell it. That is the pointer item's own owner, and only the owner — it sends
+ * `skip` once the track it queued has finished, and the server decides what
+ * plays next. Every other client sees the end, stops reporting progress, and
+ * waits for the snapshot.
  */
 export class SyncDriver {
   private lastAppliedItemId: string | null = null;
@@ -91,6 +91,11 @@ export class SyncDriver {
    * set it, so the first sync always talks to Spotify even if the head is null.
    */
   private lastSetNextUri: string | null | undefined = undefined;
+  /**
+   * The item we have already reported as finished. Four detectors can see the
+   * same end; this makes sure only the first one sends `skip`.
+   */
+  private skippedItemId: string | null = null;
   private pollHandle: ReturnType<typeof setInterval> | null = null;
   private unsubscribeChange: (() => void) | null = null;
   private readonly reportedErrors = new Set<string>();
@@ -169,6 +174,8 @@ export class SyncDriver {
     this.observedOnTrack = false;
     this.clearEndTimer();
     this.hasAppliedPointer = true;
+    // A new item is a fresh end to report.
+    if (pointer.itemId !== this.skippedItemId) this.skippedItemId = null;
 
     if (pointer.itemId === null || !pointer.uri) {
       await this.applySilence();
@@ -275,10 +282,11 @@ export class SyncDriver {
     const state = await this.tryInvoke<PlayerState>("spotify_get_state");
     if (!state) return;
 
-    // Spotify moved into the track we queued behind this one. The server will
-    // move the pointer; we only stop treating the old item as current.
+    // Spotify moved into the track we queued behind this one: our track is
+    // over. The owner says so; the server picks what is next.
     if (this.transitionedToNext(state, pointer)) {
       this.clearEndTimer();
+      this.advanceIfOwner(pointer);
       return;
     }
 
@@ -302,11 +310,13 @@ export class SyncDriver {
     const playedLongEnough = now - pointer.startedAtEpochMs > TRACK_END_GRACE_MS;
     if (playedLongEnough && this.looksFinished(state, pointer.uri)) {
       this.clearEndTimer();
+      this.advanceIfOwner(pointer);
       return;
     }
 
     if (this.ranPastDuration(state, pointer, now)) {
       this.clearEndTimer();
+      this.advanceIfOwner(pointer);
       return;
     }
 
@@ -320,9 +330,9 @@ export class SyncDriver {
 
   /**
    * Aims a single timer just past the instant the shared clock reaches the
-   * track's length. The server advances the room; this only stops the driver
-   * from holding a finished item as current. A seek moves `endsAt`, so the
-   * timer is replaced.
+   * track's length. It is the backstop for an end Spotify never reported: when
+   * it fires, the item's owner reports the end with `skip`. A seek moves
+   * `endsAt`, so the timer is replaced.
    */
   private scheduleEndTimer(pointer: PlaybackPointer, endsAtEpochMs: number, now: number): void {
     if (this.endTimerItemId === pointer.itemId && this.endTimerAtEpochMs === endsAtEpochMs) return;
@@ -339,14 +349,28 @@ export class SyncDriver {
   }
 
   /**
-   * The scheduled end arrived. There is nothing to do but stop reporting
-   * progress for an item that has run out: the server owns what plays next.
+   * The scheduled end arrived. Stop reporting progress for an item that has
+   * run out, then — if this client owns the item — tell the server it is over.
    */
   private onTrackEnded(itemId: string | null): void {
     const pointer = this.room.getPlaybackPointer();
     if (pointer.itemId !== itemId) return;
     if (pointer.isPaused) return;
     this.room.setMyProgress(null);
+    this.advanceIfOwner(pointer);
+  }
+
+  /**
+   * The pointer's track has finished. Exactly one client may say so, and the
+   * one that can is the client that queued the item: it is the only peer whose
+   * `skip` is unambiguous. Everyone else waits for the snapshot.
+   */
+  private advanceIfOwner(pointer: PlaybackPointer): void {
+    if (pointer.itemId === null) return;
+    if (pointer.ownerPubkey !== this.room.myPubkey) return;
+    if (this.skippedItemId === pointer.itemId) return;
+    this.skippedItemId = pointer.itemId;
+    this.room.skip();
   }
 
   private clearEndTimer(): void {

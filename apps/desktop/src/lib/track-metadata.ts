@@ -21,6 +21,8 @@ const cache = new Map<string, Promise<TrackMetadata | null>>();
  * blocked by CORS.
  */
 export function getTrackMetadata(trackUri: string): Promise<TrackMetadata | null> {
+  if (trackUri === "") return Promise.resolve(null);
+
   const existing = cache.get(trackUri);
   if (existing) return existing;
 

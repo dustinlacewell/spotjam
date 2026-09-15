@@ -87,6 +87,32 @@ export interface RegisteredEvent {
   username: string;
 }
 
+/** One live room, as shown in a room browser. */
+export interface RoomSummary {
+  roomId: string;
+  listeners: number;
+  /** The current pointer's track, or null when nothing is playing. */
+  trackUri: string | null;
+  /** When this room was first created. */
+  createdAtEpochMs: number;
+}
+
+export interface RoomListEvent {
+  type: "room-list";
+  rooms: RoomSummary[];
+}
+
+/**
+ * One watched room, for a browser peeking in without joining.
+ *
+ * The same snapshot a member gets, projected for the watcher — whose `myQueue`
+ * is empty, because a non-member owns no queue in that room.
+ */
+export interface RoomDetailEvent {
+  type: "room-detail";
+  snapshot: RoomSnapshot;
+}
+
 export interface ErrorEvent {
   type: "error";
   /** Machine-readable; UI maps it to copy. */
@@ -104,6 +130,11 @@ export interface ErrorEvent {
   message: string;
 }
 
-export type ServerEvent = RoomStateEvent | RegisteredEvent | ErrorEvent;
+export type ServerEvent =
+  | RoomStateEvent
+  | RegisteredEvent
+  | RoomListEvent
+  | RoomDetailEvent
+  | ErrorEvent;
 
 export type ServerEventType = ServerEvent["type"];

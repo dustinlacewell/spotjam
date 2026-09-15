@@ -8,19 +8,28 @@
 import {
   open,
   isOp,
+  isQuery,
   type AuthPayload,
   type Envelope,
   type ErrorEvent,
   type Op,
+  type Query,
+  type RoomSummary,
   type ServerEvent,
 } from "@spotjam/protocol";
 
-import { connectionsInRoom, type Connection } from "./connections.ts";
+import {
+  connectionsInRoom,
+  connectionsWatchingList,
+  connectionsWatchingRoom,
+  type Connection,
+} from "./connections.ts";
 import { handleOp, type ErrorCode } from "./handle-op.ts";
 import type { IdentityStore } from "./identity-store.ts";
 import type { Clock, Rng } from "./ports.ts";
 import type { ReplayGuard } from "./replay-guard.ts";
 import * as Room from "./room-state.ts";
+import { sameSummary, summarize } from "./room-summary.ts";
 import type { RoomRegistry } from "./rooms.ts";
 
 export interface SessionDeps {
@@ -40,6 +49,14 @@ export interface SessionDeps {
 export class Session {
   readonly #deps: SessionDeps;
   readonly #connections = new Set<Connection>();
+  /**
+   * The last summary published for each room.
+   *
+   * The gate for list watchers: a room commits on every progress tick, and a
+   * tick changes nothing a browser shows. Without this, watching the list
+   * would cost one push per second per live room.
+   */
+  readonly #lastSummary = new Map<string, RoomSummary>();
 
   constructor(deps: SessionDeps) {
     this.#deps = deps;
@@ -70,7 +87,12 @@ export class Session {
       return;
     }
 
-    send(connection, error("malformed", "Payload is neither an auth message nor an op."));
+    if (isQuery(payload)) {
+      this.#handleQuery(connection, pubkey, payload);
+      return;
+    }
+
+    send(connection, error("malformed", "Payload is neither an auth message, an op, nor a query."));
   }
 
   /** Drop a socket: leave its room, then tell whoever is left. */
@@ -78,18 +100,20 @@ export class Session {
     this.#connections.delete(connection);
     const { roomId, pubkey } = connection;
     connection.roomId = null;
+    connection.watchingList = false;
+    connection.watchingRoomId = null;
     if (roomId === null || pubkey === null) return;
 
     // Another socket may hold the same key; the identity stays in the room
     // until its last connection goes.
     if (this.#stillPresent(pubkey, roomId)) {
-      this.#broadcast(roomId);
+      this.#publish(roomId);
       return;
     }
 
     const { rooms } = this.#deps;
     rooms.commit(Room.leave(rooms.get(roomId), pubkey));
-    this.#broadcast(roomId);
+    this.#publish(roomId);
   }
 
   // -------------------------------------------------------------------------
@@ -191,17 +215,63 @@ export class Session {
       send(connection, error(outcome.error, `Op ${op.type} refused: ${outcome.error}.`));
       return;
     }
-    this.#broadcast(op.roomId);
+    this.#publish(op.roomId);
+  }
+
+  /** A query needs an authenticated key but no room membership. */
+  #handleQuery(connection: Connection, pubkey: string, query: Query): void {
+    if (connection.pubkey === null) {
+      send(connection, error("unknown-identity", "Authenticate before sending queries."));
+      return;
+    }
+    if (connection.pubkey !== pubkey) {
+      send(connection, error("unknown-identity", "Envelope key does not match this session."));
+      return;
+    }
+
+    switch (query.type) {
+      case "watch-rooms":
+        connection.watchingList = true;
+        send(connection, { type: "room-list", rooms: this.#deps.rooms.summaries() });
+        return;
+
+      case "unwatch-rooms":
+        connection.watchingList = false;
+        return;
+
+      case "watch-room": {
+        if (typeof query.roomId !== "string" || query.roomId.length === 0) {
+          send(connection, error("malformed", "Query is missing a room id."));
+          return;
+        }
+        // One room at a time: the second watch replaces the first.
+        connection.watchingRoomId = query.roomId;
+        const { rooms, clock } = this.#deps;
+        send(connection, {
+          type: "room-detail",
+          snapshot: Room.projectSnapshot(rooms.get(query.roomId), pubkey, clock.now()),
+        });
+        return;
+      }
+
+      case "unwatch-room":
+        if (typeof query.roomId !== "string" || query.roomId.length === 0) {
+          send(connection, error("malformed", "Query is missing a room id."));
+          return;
+        }
+        if (connection.watchingRoomId === query.roomId) connection.watchingRoomId = null;
+        return;
+    }
   }
 
   #joinRoom(connection: Connection, pubkey: string, username: string, roomId: string): void {
     if (connection.roomId !== null && connection.roomId !== roomId) {
       this.#leaveRoom(connection, pubkey, connection.roomId);
     }
-    const { rooms } = this.#deps;
-    rooms.commit(Room.join(rooms.get(roomId), pubkey, username));
+    const { rooms, clock } = this.#deps;
+    rooms.commit(Room.join(rooms.get(roomId, clock.now()), pubkey, username));
     connection.roomId = roomId;
-    this.#broadcast(roomId);
+    this.#publish(roomId);
   }
 
   #leaveRoom(connection: Connection, pubkey: string, roomId: string): void {
@@ -215,7 +285,7 @@ export class Session {
     if (!this.#stillPresent(pubkey, roomId)) {
       rooms.commit(Room.leave(rooms.get(roomId), pubkey));
     }
-    this.#broadcast(roomId);
+    this.#publish(roomId);
     // The leaver gets a final view of the room they are no longer in, so their
     // UI can settle rather than keep the last shared snapshot.
     send(connection, {
@@ -231,8 +301,14 @@ export class Session {
     );
   }
 
-  /** One snapshot per recipient, because myQueue is the recipient's own. */
-  #broadcast(roomId: string): void {
+  /**
+   * Tell everyone who cares that this room moved.
+   *
+   * Three audiences: its members, whoever is peeking at it, and whoever is
+   * watching the room list. One snapshot per recipient, because myQueue is the
+   * recipient's own.
+   */
+  #publish(roomId: string): void {
     const { rooms, clock } = this.#deps;
     const state = rooms.get(roomId);
     const now = clock.now();
@@ -243,6 +319,38 @@ export class Session {
         type: "room-state",
         snapshot: Room.projectSnapshot(state, connection.pubkey, now),
       });
+    }
+
+    // Watchers see position, so a progress tick is news to them.
+    for (const connection of connectionsWatchingRoom(this.#connections, roomId)) {
+      if (connection.pubkey === null) continue;
+      send(connection, {
+        type: "room-detail",
+        snapshot: Room.projectSnapshot(state, connection.pubkey, now),
+      });
+    }
+
+    this.#publishList(roomId);
+  }
+
+  /** Push a fresh room list, but only when this room's row actually changed. */
+  #publishList(roomId: string): void {
+    const { rooms } = this.#deps;
+    const previous = this.#lastSummary.get(roomId);
+
+    if (!rooms.has(roomId)) {
+      // Gone from the registry: deserted, and the list must lose the row.
+      if (previous === undefined) return;
+      this.#lastSummary.delete(roomId);
+    } else {
+      const current = summarize(rooms.get(roomId));
+      if (previous !== undefined && sameSummary(previous, current)) return;
+      this.#lastSummary.set(roomId, current);
+    }
+
+    const summaries = rooms.summaries();
+    for (const connection of connectionsWatchingList(this.#connections)) {
+      send(connection, { type: "room-list", rooms: summaries });
     }
   }
 }

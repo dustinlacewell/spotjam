@@ -11,7 +11,8 @@ import {
   type ServerEvent,
 } from "@spotjam/protocol";
 import { IdentityClient } from "./identity";
-import { RoomClient, type SocketLike } from "./room";
+import { Connection, type SocketLike } from "./connection";
+import { RoomClient } from "./room";
 
 const ROOM = "jam";
 const EPOCH = 1_700_000_000_000;
@@ -82,8 +83,7 @@ function makeRoom(options: { username?: string } = {}) {
   const sockets: FakeSocket[] = [];
   const timers: Array<{ fn: () => void; ms: number }> = [];
 
-  const room = new RoomClient(
-    ROOM,
+  const connection = new Connection(
     { publicKey: keypair.publicKey, username: options.username ?? "alice" },
     {
       url: "wss://test.invalid",
@@ -101,9 +101,11 @@ function makeRoom(options: { username?: string } = {}) {
       now: () => EPOCH,
     },
   );
+  const room = new RoomClient(connection, ROOM);
 
   return {
     room,
+    connection,
     keypair,
     sockets,
     timers,
@@ -654,24 +656,26 @@ describe("RoomClient reconnect", () => {
     harness.room.destroy();
   });
 
-  it("stops reconnecting once destroyed", async () => {
+  it("stops reconnecting once the connection is destroyed", async () => {
     const harness = makeRoom();
     harness.latest().open();
     await settle();
 
     harness.room.destroy();
+    harness.connection.destroy();
     harness.latest().drop();
 
     expect(harness.timers).toHaveLength(0);
     expect(harness.sockets).toHaveLength(1);
   });
 
-  it("closes the live socket on destroy", async () => {
+  it("closes the live socket when the connection is destroyed", async () => {
     const harness = makeRoom();
     harness.latest().open();
     await settle();
 
     harness.room.destroy();
+    harness.connection.destroy();
 
     expect(harness.latest().closed).toBe(true);
   });

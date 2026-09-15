@@ -1,4 +1,4 @@
-import type { Op, QueueItem } from "@spotjam/protocol";
+import { NULL_POINTER, type Op, type QueueItem } from "@spotjam/protocol";
 import { describe, expect, it } from "vitest";
 
 import { handleOp, type OpContext } from "./handle-op.ts";
@@ -107,6 +107,64 @@ describe("handleOp", () => {
 
     const outcome = handleOp(state, ALICE, { type: "skip", roomId: "jam" }, ctx);
     expect(outcome.state.pointer.itemId).toBe("a1");
+  });
+
+  it("starts playback when a broadcaster enqueues into a silent room", () => {
+    let state = room();
+    state = Room.setBroadcasting(state, ALICE, true);
+
+    const outcome = handleOp(state, ALICE, {
+      type: "enqueue",
+      roomId: "jam",
+      items: [track("a1")],
+    }, ctx);
+
+    expect(outcome.state.pointer).toMatchObject({
+      itemId: "a1",
+      ownerPubkey: ALICE,
+      startedAtEpochMs: NOW,
+    });
+  });
+
+  it("starts playback when a member with tracks starts broadcasting", () => {
+    let state = room();
+    state = Room.enqueue(state, ALICE, [track("a1")]);
+
+    const outcome = handleOp(state, ALICE, {
+      type: "set-broadcasting",
+      roomId: "jam",
+      broadcasting: true,
+    }, ctx);
+
+    expect(outcome.state.pointer.itemId).toBe("a1");
+  });
+
+  it("stays silent when the enqueuing member is not broadcasting", () => {
+    const outcome = handleOp(room(), ALICE, {
+      type: "enqueue",
+      roomId: "jam",
+      items: [track("a1")],
+    }, ctx);
+
+    expect(outcome.state.pointer).toEqual(NULL_POINTER);
+  });
+
+  it("restarts after exhaustion when a new track arrives", () => {
+    let state = room();
+    state = Room.setBroadcasting(state, ALICE, true);
+    state = Room.enqueue(state, ALICE, [track("a1")]);
+    state = Room.advance(state, NOW);
+
+    // Skipping the last track empties the room; settleStart has nothing to feed.
+    state = handleOp(state, ALICE, { type: "skip", roomId: "jam" }, ctx).state;
+    expect(state.pointer).toEqual(NULL_POINTER);
+
+    state = handleOp(state, ALICE, {
+      type: "enqueue",
+      roomId: "jam",
+      items: [track("a2")],
+    }, ctx).state;
+    expect(state.pointer.itemId).toBe("a2");
   });
 
   it("keeps a progress sample without moving the pointer", () => {

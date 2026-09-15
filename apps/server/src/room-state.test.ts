@@ -244,6 +244,45 @@ describe("advance", () => {
   });
 });
 
+describe("settleStart", () => {
+  it("starts playback when a broadcaster has tracks and nothing is playing", () => {
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.setBroadcasting(state, ALICE, true);
+    state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
+
+    state = Room.settleStart(state, NOW);
+    expect(state.pointer).toMatchObject({
+      itemId: "t1",
+      ownerPubkey: ALICE,
+      startedAtEpochMs: NOW,
+    });
+    expect(ids(state, ALICE)).toEqual(["t2"]);
+  });
+
+  it("leaves a pointer that already names a track", () => {
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.setBroadcasting(state, ALICE, true);
+    state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
+    state = Room.advance(state, NOW);
+
+    expect(Room.settleStart(state, NOW + 5_000)).toBe(state);
+  });
+
+  it("does nothing when the member with tracks is not broadcasting", () => {
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.enqueue(state, ALICE, [track("t1")]);
+
+    expect(Room.settleStart(state, NOW)).toBe(state);
+  });
+
+  it("does nothing when the broadcaster's queue is empty", () => {
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.setBroadcasting(state, ALICE, true);
+
+    expect(Room.settleStart(state, NOW)).toBe(state);
+  });
+});
+
 describe("pointer clearing", () => {
   it("clears when the last broadcaster stops broadcasting", () => {
     let state = roomWith([ALICE, "alice"]);

@@ -28,6 +28,10 @@ export interface OpOutcome {
  *
  * The caller has already established that `pubkey` is a member of `state`;
  * routing an op to the right room is the shell's job, not this one's.
+ *
+ * Every op that lands settles playback afterwards: the server, not a client,
+ * decides when a room with a broadcaster and a queue starts playing. Doing it
+ * here rather than per-op means no future op can forget to.
  */
 export function handleOp(
   state: RoomState,
@@ -37,6 +41,18 @@ export function handleOp(
 ): OpOutcome {
   if (!state.members.has(pubkey)) return { state, error: "not-in-room" };
 
+  const outcome = applyOp(state, pubkey, op, ctx);
+  if (outcome.error !== undefined) return outcome;
+  return { state: Room.settleStart(outcome.state, ctx.now) };
+}
+
+/** The op's own transition, before playback settles. */
+function applyOp(
+  state: RoomState,
+  pubkey: string,
+  op: Op,
+  ctx: OpContext,
+): OpOutcome {
   switch (op.type) {
     case "join-room":
     case "leave-room":

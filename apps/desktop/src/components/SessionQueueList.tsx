@@ -5,9 +5,7 @@ import styles from "./QueueLists.module.css";
 export function SessionQueueList({ entries }: { entries: SessionEntry[] }) {
   if (entries.length === 0) {
     return (
-      <p className={styles.empty}>
-        Nothing up next. Broadcasters' queues feed this list.
-      </p>
+      <p className={styles.empty}>Drop a song or playlist here.</p>
     );
   }
 

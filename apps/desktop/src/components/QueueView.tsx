@@ -21,7 +21,15 @@ import { Sidebar, type Selection } from "./Sidebar";
 import { useRoomSnapshot } from "./use-room-snapshot";
 import styles from "./QueueView.module.css";
 
-export function QueueView({ room, roomId }: { room: Room; roomId: string }) {
+export function QueueView({
+  room,
+  roomId,
+  onLeave,
+}: {
+  room: Room;
+  roomId: string;
+  onLeave: () => void;
+}) {
   const { status, participants, sessionQueue, pointer, myProgress, myQueue, queueOf, error } =
     useRoomSnapshot(room);
   const playlistsApi = usePlaylists();
@@ -74,17 +82,21 @@ export function QueueView({ room, roomId }: { room: Room; roomId: string }) {
   return (
     <div className={styles.page}>
       <header className={styles.header}>
-        <div className={styles.mark}>spotjam</div>
+        <div className={styles.mark}>
+          spotjam<span className={styles.roomCode}>: {roomId}</span>
+        </div>
         <div className={styles.headerRight}>
           <div className={statusClass(status)}>
             <span className={styles.statusDot} />
             {statusLabel(status, participants.length)}
           </div>
-          <div className={styles.roomCode}>{roomId}</div>
           <BroadcastToggle
             broadcasting={broadcasting}
             onToggle={() => room.setBroadcasting(!broadcasting)}
           />
+          <button type="button" className={styles.leaveButton} onClick={onLeave}>
+            Leave room
+          </button>
         </div>
       </header>
 
@@ -95,7 +107,6 @@ export function QueueView({ room, roomId }: { room: Room; roomId: string }) {
       <div className={styles.body}>
         <Sidebar
           participants={participants}
-          myPubkey={myPubkey}
           playingOwnerPubkey={pointer.ownerPubkey}
           selection={selection}
           onSelect={(next) => {
@@ -267,5 +278,5 @@ function statusLabel(status: ConnectionStatus, listeners: number): string {
   // Socket up, no snapshot yet: the handshake is mid-flight. Saying
   // "connecting" here hid which half was stuck.
   if (!status.synced) return "joining";
-  return listeners === 1 ? "just you" : `${listeners} listening`;
+  return listeners === 1 ? "Connected" : `${listeners} listening`;
 }

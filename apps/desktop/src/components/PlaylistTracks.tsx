@@ -1,3 +1,4 @@
+import { ListPlus, ListStart, Shuffle } from "lucide-react";
 import type { Playlist } from "../lib/playlists";
 import type { ParsedLinks, ParsedTrack } from "../lib/spotify-link";
 import type { QueueItem } from "../lib/room";
@@ -34,27 +35,33 @@ export function PlaylistTracks({
         <div className={styles.tracksActions}>
           <button
             type="button"
-            className={styles.pillAction}
+            className={styles.iconAction}
             disabled={playlist.tracks.length < 2}
             onClick={onShuffle}
+            aria-label="Shuffle"
+            title="Shuffle"
           >
-            Shuffle
+            <Shuffle size={16} strokeWidth={2} />
           </button>
           <button
             type="button"
-            className={styles.pillAction}
+            className={styles.iconAction}
             disabled={isEmpty}
             onClick={onAddToQueue}
+            aria-label="Add to queue"
+            title="Add to queue"
           >
-            Add to queue
+            <ListPlus size={16} strokeWidth={2} />
           </button>
           <button
             type="button"
-            className={styles.pillAction}
+            className={styles.iconAction}
             disabled={isEmpty}
             onClick={onReplaceQueue}
+            aria-label="Replace queue"
+            title="Replace queue"
           >
-            Replace queue
+            <ListStart size={16} strokeWidth={2} />
           </button>
         </div>
       </div>

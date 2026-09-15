@@ -5,15 +5,23 @@
 // deserted room would let stale queues and a stale pointer greet whoever joined
 // that id next.
 
+import type { RoomSummary } from "@spotjam/protocol";
+
 import * as Room from "./room-state.ts";
 import type { RoomState } from "./room-state.ts";
+import { summarize } from "./room-summary.ts";
 
 export class RoomRegistry {
   readonly #rooms = new Map<string, RoomState>();
 
-  /** The room as it stands, or a fresh empty one. Does not register it. */
-  get(roomId: string): RoomState {
-    return this.#rooms.get(roomId) ?? Room.emptyRoom(roomId);
+  /**
+   * The room as it stands, or a fresh empty one. Does not register it.
+   *
+   * `now` stamps a freshly minted room's `createdAtEpochMs`; an existing room
+   * ignores it entirely, so a caller with no clock handy may omit it.
+   */
+  get(roomId: string, now?: number): RoomState {
+    return this.#rooms.get(roomId) ?? Room.emptyRoom(roomId, now);
   }
 
   has(roomId: string): boolean {
@@ -36,5 +44,10 @@ export class RoomRegistry {
 
   ids(): string[] {
     return [...this.#rooms.keys()];
+  }
+
+  /** Every live room, for a room browser. A deserted room is never stored, so this needs no filtering. */
+  summaries(): RoomSummary[] {
+    return [...this.#rooms.values()].map(summarize);
   }
 }

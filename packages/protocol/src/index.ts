@@ -64,10 +64,22 @@ export {
   type RoomSnapshot,
   type RoomStateEvent,
   type RegisteredEvent,
+  type RoomSummary,
+  type RoomListEvent,
+  type RoomDetailEvent,
   type ErrorEvent,
   type ServerEvent,
   type ServerEventType,
 } from "./events.js";
+
+export {
+  isQuery,
+  type Query,
+  type WatchRoomsQuery,
+  type UnwatchRoomsQuery,
+  type WatchRoomQuery,
+  type UnwatchRoomQuery,
+} from "./queries.js";
 
 export {
   isValidUsername,

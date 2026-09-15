@@ -280,7 +280,10 @@ describe("interop — a signed client against a real server", () => {
 
     client.send({ type: "set-broadcasting", roomId: "jam", broadcasting: true }, alice);
     const live = expectRoomState(await client.next());
-    expect(ids(live)).toEqual(["a1", "a2"]);
+    // Broadcasting with tracks queued starts playback: a1 is playing, so the
+    // session queue holds only what is still waiting.
+    expect(live.pointer.itemId).toBe("a1");
+    expect(ids(live)).toEqual(["a2"]);
     expect(live.participants[0]?.broadcasting).toBe(true);
   });
 
@@ -317,9 +320,11 @@ describe("interop — a signed client against a real server", () => {
     );
     await clientA.next();
 
-    // Everyone's first track, then everyone's second — join order decides
-    // who leads.
-    expect(ids(expectRoomState(await clientB.next()))).toEqual(["a1", "b1", "a2", "b2"]);
+    // Alice's enqueue started a1 at once, so a1 is playing rather than queued.
+    // The rest still interleaves: everyone's next track, then the one after.
+    const snapshot = expectRoomState(await clientB.next());
+    expect(snapshot.pointer.itemId).toBe("a1");
+    expect(ids(snapshot)).toEqual(["b1", "a2", "b2"]);
   });
 
   it("gives one identity a single turn even across two connections", async () => {
@@ -365,9 +370,11 @@ describe("interop — a signed client against a real server", () => {
 
     const snapshot = expectRoomState(await clientB.next());
     expect(snapshot.participants).toHaveLength(2);
-    expect(ids(snapshot)).toEqual(["a1", "b1", "a2", "b2"]);
-    // The giveaway for a dedupe bug would be a1 appearing twice per round.
-    expect(ids(snapshot).filter((id) => id === "a1")).toHaveLength(1);
+    // Alice's enqueue started a1 at once, so it is playing rather than queued.
+    expect(snapshot.pointer.itemId).toBe("a1");
+    expect(ids(snapshot)).toEqual(["b1", "a2", "b2"]);
+    // The giveaway for a dedupe bug would be Alice getting two slots per round.
+    expect(ids(snapshot).filter((id) => id.startsWith("a"))).toEqual(["a2"]);
   });
 
   it("discards a room when its last participant disconnects", async () => {
@@ -381,7 +388,10 @@ describe("interop — a signed client against a real server", () => {
     client.send({ type: "set-broadcasting", roomId: "jam", broadcasting: true }, alice);
     await client.next();
     client.send({ type: "enqueue", roomId: "jam", items: [track("a1"), track("a2")] }, alice);
-    expect(ids(expectRoomState(await client.next()))).toEqual(["a1", "a2"]);
+    // Alice is already broadcasting, so a1 starts playing and a2 waits.
+    const enqueued = expectRoomState(await client.next());
+    expect(enqueued.pointer.itemId).toBe("a1");
+    expect(ids(enqueued)).toEqual(["a2"]);
 
     expect(server.rooms.has("jam")).toBe(true);
 
@@ -435,10 +445,8 @@ describe("interop — a signed client against a real server", () => {
 
     client.send({ type: "set-broadcasting", roomId: "jam", broadcasting: true }, alice);
     await client.next();
+    // Alice is already broadcasting, so the enqueue itself starts playback.
     client.send({ type: "enqueue", roomId: "jam", items: [track("a1")] }, alice);
-    await client.next();
-
-    client.send({ type: "skip", roomId: "jam" }, alice);
     const playing = expectRoomState(await client.next());
     expect(playing.pointer.itemId).toBe("a1");
     expect(playing.pointer.ownerPubkey).toBe(alice.publicKey);
@@ -465,10 +473,8 @@ describe("interop — a signed client against a real server", () => {
     clientA.send({ type: "set-broadcasting", roomId: "jam", broadcasting: true }, alice);
     await clientA.next();
     await clientB.next();
+    // Alice is already broadcasting, so the enqueue itself starts playback.
     clientA.send({ type: "enqueue", roomId: "jam", items: [track("a1")] }, alice);
-    await clientA.next();
-    await clientB.next();
-    clientA.send({ type: "skip", roomId: "jam" }, alice);
     const playing = expectRoomState(await clientA.next());
     await clientB.next();
     expect(playing.pointer.itemId).toBe("a1");
@@ -505,8 +511,7 @@ describe("interop — a signed client against a real server", () => {
       { type: "enqueue", roomId: "jam", items: [track("a1"), track("a2")] },
       alice,
     );
-    await client.next();
-    client.send({ type: "skip", roomId: "jam" }, alice);
+    // Alice is already broadcasting, so the enqueue itself starts a1.
     await client.next();
 
     client.send(
@@ -545,10 +550,8 @@ describe("interop — a signed client against a real server", () => {
     clientA.send({ type: "set-broadcasting", roomId: "jam", broadcasting: true }, alice);
     await clientA.next();
     await clientB.next();
+    // Alice is already broadcasting, so the enqueue itself starts playback.
     clientA.send({ type: "enqueue", roomId: "jam", items: [track("a1")] }, alice);
-    await clientA.next();
-    await clientB.next();
-    clientA.send({ type: "skip", roomId: "jam" }, alice);
     expect(expectRoomState(await clientA.next()).pointer.itemId).toBe("a1");
     await clientB.next();
 

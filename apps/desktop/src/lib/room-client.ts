@@ -158,7 +158,13 @@ export function toQueueItems(tracks: ParsedTrack[]): QueueItem[] {
 export function isServerEvent(value: unknown): value is ServerEvent {
   if (typeof value !== "object" || value === null) return false;
   const type = (value as { type?: unknown }).type;
-  return type === "room-state" || type === "registered" || type === "error";
+  return (
+    type === "room-state" ||
+    type === "registered" ||
+    type === "room-list" ||
+    type === "room-detail" ||
+    type === "error"
+  );
 }
 
 /** Parse a raw frame. Null when it is not something the protocol defines. */
@@ -194,6 +200,16 @@ export function reduce(view: RoomView, event: ServerEvent): RoomView {
     case "registered":
       // Nothing to store: the snapshot carries the username the server chose,
       // and the shell handles the join that follows.
+      return view;
+
+    case "room-list":
+      // The lobby's concern, not a joined room's: nothing here reads it.
+      return view;
+
+    case "room-detail":
+      // A room the browser is watching, which is not this client's room even
+      // when the ids match. Folding it in would let a peek overwrite the
+      // member's own view, whose `myQueue` a watcher's snapshot does not have.
       return view;
 
     case "error":
