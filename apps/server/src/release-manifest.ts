@@ -29,8 +29,14 @@ export interface ManifestUpdate {
   platforms: Record<string, ManifestPlatform>;
 }
 
-/** Tauri's platform keys, e.g. `windows-x86_64`. */
-const PLATFORM_KEY = /^(darwin|linux|windows)-(x86_64|aarch64|i686|armv7)$/;
+/**
+ * Tauri's platform keys, e.g. `windows-x86_64`.
+ *
+ * A key may carry a bundle suffix — `linux-x86_64-appimage`, `darwin-x86_64-app`
+ * — which lets a client ask for one installer type. Both forms are stored, so
+ * what the server serves matches what the release actually holds.
+ */
+const PLATFORM_KEY = /^(darwin|linux|windows)-(x86_64|aarch64|i686|armv7)(-[a-z0-9]+)?$/;
 
 function isPlatform(value: unknown): value is ManifestPlatform {
   if (typeof value !== "object" || value === null) return false;

@@ -50,6 +50,39 @@ describe("parseUpdate", () => {
     expect(parseUpdate(body)).toBeNull();
   });
 
+  // tauri-action emits a bundle-suffixed key beside each bare one, so a real
+  // release document carries both forms.
+  it.each([
+    "darwin-x86_64-app",
+    "darwin-aarch64-app",
+    "linux-x86_64-appimage",
+    "linux-x86_64-deb",
+    "linux-x86_64-rpm",
+    "windows-x86_64-nsis",
+  ])("accepts the bundle-suffixed key %s", (key) => {
+    const parsed = parseUpdate({ version: "0.1.0", platforms: { [key]: LINUX } });
+    expect(parsed?.platforms[key]).toEqual(LINUX);
+  });
+
+  it("takes a whole real release document", () => {
+    const parsed = parseUpdate({
+      version: "0.1.0",
+      notes: "",
+      pub_date: "2026-09-15T19:52:43.278Z",
+      platforms: {
+        "darwin-x86_64": MAC,
+        "darwin-x86_64-app": MAC,
+        "darwin-aarch64": MAC,
+        "darwin-aarch64-app": MAC,
+        "linux-x86_64": LINUX,
+        "linux-x86_64-appimage": LINUX,
+        "linux-x86_64-deb": LINUX,
+        "linux-x86_64-rpm": LINUX,
+      },
+    });
+    expect(Object.keys(parsed?.platforms ?? {})).toHaveLength(8);
+  });
+
   it("drops fields it does not know", () => {
     const parsed = parseUpdate({
       version: "0.2.0",
