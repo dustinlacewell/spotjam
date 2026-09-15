@@ -28,8 +28,11 @@ import type { Connection } from "./connection";
 import {
   INITIAL_VIEW,
   isBroadcasting,
+  loadQueue,
   myQueueOf,
   ops,
+  queueToRestore,
+  saveQueue,
   participantsOf,
   peerPlaylistsOf,
   pointerOf,
@@ -111,6 +114,27 @@ export class RoomClient implements Room {
     this.#connection.send(ops.joinRoom(this.roomId));
   }
 
+  /**
+   * Keep this install's copy of our queue, and hand it back to a server that
+   * lost it.
+   *
+   * The server holds queues in memory only, so a deploy wipes every one of
+   * them. Every client then reconnects, rejoins, and sees an empty queue. The
+   * first snapshot after each join -- the one that flips `synced` on -- is
+   * where that shows, so that is where the stored copy is offered back.
+   *
+   * Saving happens after the restore decision, never before: the empty
+   * snapshot from a restarted server would otherwise overwrite the stored
+   * queue a moment before it is read.
+   */
+  #persistQueue(snapshot: RoomSnapshot, wasSynced: boolean): void {
+    if (!wasSynced && this.#view.status.synced) {
+      const restore = queueToRestore(loadQueue(this.roomId), snapshot);
+      if (restore.length > 0) this.#sendOp(ops.enqueue(this.roomId, restore));
+    }
+    saveQueue(this.roomId, snapshot.myQueue);
+  }
+
   // --- events ------------------------------------------------------------
 
   /** Only this room's news, filtered out of every event the connection sees. */
@@ -132,6 +156,9 @@ export class RoomClient implements Room {
     if (reduced === this.#view && !socketChanged) return;
 
     this.#view = { ...reduced, status: { ...reduced.status, socket: this.#liveSocket() } };
+    if (event.type === "room-state") {
+      this.#persistQueue(event.snapshot, previousStatus.synced);
+    }
     // Status listeners are a separate channel from onChange, so without this
     // the UI never hears that the socket or the room's sync state changed.
     if (this.#view.status.socket !== previousStatus.socket || this.#view.status.synced !== previousStatus.synced) {

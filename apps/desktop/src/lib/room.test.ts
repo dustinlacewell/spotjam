@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   NULL_POINTER,
   canonicalBytes,
@@ -130,6 +130,27 @@ function snapshot(overrides: Partial<RoomSnapshot> = {}): RoomSnapshot {
     ...overrides,
   };
 }
+
+/** The queue store reads a global `localStorage`; node has none. */
+function fakeStorage() {
+  const map = new Map<string, string>();
+  return {
+    getItem: (key: string) => map.get(key) ?? null,
+    setItem: (key: string, value: string) => void map.set(key, value),
+    removeItem: (key: string) => void map.delete(key),
+    clear: () => map.clear(),
+    key: () => null,
+    length: 0,
+  } as unknown as Storage;
+}
+
+beforeEach(() => {
+  globalThis.localStorage = fakeStorage();
+});
+
+afterEach(() => {
+  Reflect.deleteProperty(globalThis, "localStorage");
+});
 
 /** Lets the handshake's promise chain settle. */
 const settle = () => Promise.resolve().then(() => {}).then(() => {}).then(() => {});
@@ -568,6 +589,89 @@ describe("RoomClient snapshots", () => {
     latest().onmessage?.({ data: 42 });
 
     expect(changes).not.toHaveBeenCalled();
+    room.destroy();
+  });
+});
+
+describe("RoomClient queue restore", () => {
+  const KEY = `spotjam.queue.${ROOM}`;
+  const STORED = [
+    { id: "i1", uri: "spotify:track:x", trackId: "x" },
+    { id: "i2", uri: "spotify:track:y", trackId: "y" },
+  ];
+
+  /** Every enqueue payload the live socket has been handed. */
+  function enqueues(socket: FakeSocket): unknown[] {
+    return socket.payloads().filter((p) => (p as { type: string }).type === "enqueue");
+  }
+
+  it("restores the stored queue when a restarted server has none", async () => {
+    localStorage.setItem(KEY, JSON.stringify(STORED));
+    const { room, latest, keypair } = makeRoom();
+    await greet(latest(), keypair.publicKey);
+
+    latest().deliver({ type: "room-state", snapshot: snapshot() });
+    await settle();
+
+    expect(enqueues(latest())).toEqual([{ type: "enqueue", roomId: ROOM, items: STORED }]);
+    room.destroy();
+  });
+
+  it("restores once, not on every later snapshot", async () => {
+    localStorage.setItem(KEY, JSON.stringify(STORED));
+    const { room, latest, keypair } = makeRoom();
+    await greet(latest(), keypair.publicKey);
+
+    latest().deliver({ type: "room-state", snapshot: snapshot() });
+    latest().deliver({ type: "room-state", snapshot: snapshot() });
+    await settle();
+
+    expect(enqueues(latest())).toHaveLength(1);
+    room.destroy();
+  });
+
+  it("restores nothing when the server still holds the queue", async () => {
+    localStorage.setItem(KEY, JSON.stringify(STORED));
+    const { room, latest, keypair } = makeRoom();
+    await greet(latest(), keypair.publicKey);
+
+    latest().deliver({ type: "room-state", snapshot: snapshot({ myQueue: STORED }) });
+    await settle();
+
+    expect(enqueues(latest())).toEqual([]);
+    room.destroy();
+  });
+
+  it("restores again after a reconnect", async () => {
+    localStorage.setItem(KEY, JSON.stringify(STORED));
+    const harness = makeRoom();
+    await greet(harness.latest(), harness.keypair.publicKey);
+    harness.latest().deliver({ type: "room-state", snapshot: snapshot({ myQueue: STORED }) });
+    await settle();
+
+    // The server restarts: the socket drops, the client rejoins, and the
+    // room comes back empty.
+    harness.latest().drop();
+    harness.runTimer();
+    await greet(harness.latest(), harness.keypair.publicKey);
+    harness.latest().deliver({ type: "room-state", snapshot: snapshot() });
+    await settle();
+
+    expect(enqueues(harness.latest())).toEqual([
+      { type: "enqueue", roomId: ROOM, items: STORED },
+    ]);
+    harness.room.destroy();
+  });
+
+  it("stores every snapshot's queue", async () => {
+    const { room, latest, keypair } = makeRoom();
+    await greet(latest(), keypair.publicKey);
+
+    latest().deliver({ type: "room-state", snapshot: snapshot() });
+    latest().deliver({ type: "room-state", snapshot: snapshot({ myQueue: STORED }) });
+    await settle();
+
+    expect(JSON.parse(localStorage.getItem(KEY) ?? "null")).toEqual(STORED);
     room.destroy();
   });
 });

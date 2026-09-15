@@ -75,6 +75,30 @@ describe("queue operations", () => {
     expect(ids(state, ALICE)).toEqual(["t1", "t2", "t3"]);
   });
 
+  it("drops an item the queue already holds", () => {
+    // Two windows on one identity both restore the same stored queue.
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
+    state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
+
+    expect(ids(state, ALICE)).toEqual(["t1", "t2"]);
+  });
+
+  it("keeps the fresh items out of a partly duplicate batch", () => {
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.enqueue(state, ALICE, [track("t1")]);
+    state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
+
+    expect(ids(state, ALICE)).toEqual(["t1", "t2"]);
+  });
+
+  it("drops a duplicate within one batch", () => {
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.enqueue(state, ALICE, [track("t1"), track("t1")]);
+
+    expect(ids(state, ALICE)).toEqual(["t1"]);
+  });
+
   it("never mutates the input state", () => {
     const before = Room.enqueue(roomWith([ALICE, "alice"]), ALICE, [track("t1")]);
     const after = Room.enqueue(before, ALICE, [track("t2")]);

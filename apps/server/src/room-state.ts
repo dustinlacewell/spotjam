@@ -126,12 +126,29 @@ export function setBroadcasting(
 // Queue operations — each scoped to one member's own queue
 // ---------------------------------------------------------------------------
 
+/**
+ * Append to one member's queue, skipping entries it already holds.
+ *
+ * Item ids are fresh per add, so a duplicate id means the same entry arriving
+ * twice. Clients restore their stored queue to a server that restarted, and
+ * two windows on one identity both restore the same entries; the second must
+ * land as a no-op rather than as a doubled queue.
+ */
 export function enqueue(
   state: RoomState,
   pubkey: PublicKeyHex,
   items: readonly QueueItem[],
 ): RoomState {
-  return mapQueue(state, pubkey, (queue) => [...queue, ...items]);
+  return mapQueue(state, pubkey, (queue) => {
+    const seen = new Set(queue.map((item) => item.id));
+    const fresh: QueueItem[] = [];
+    for (const item of items) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      fresh.push(item);
+    }
+    return fresh.length === 0 ? queue : [...queue, ...fresh];
+  });
 }
 
 export function remove(

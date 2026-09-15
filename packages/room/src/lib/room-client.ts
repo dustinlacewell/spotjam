@@ -311,6 +311,21 @@ export function myQueueOf(view: RoomView): QueueItem[] {
   return view.snapshot?.myQueue ?? [];
 }
 
+/**
+ * What of a locally stored queue is worth sending back after a join.
+ *
+ * A fresh server knows nothing: its restart wiped every member's queue, and
+ * the first snapshot after the rejoin shows an empty `myQueue`. That is the
+ * one case where the stored copy is the better truth, so it goes back.
+ *
+ * A server that still holds the queue wins. Its copy has seen every op since
+ * the stored one was written -- removes, moves, skips -- so restoring on top
+ * of it would resurrect tracks the member already played or dropped.
+ */
+export function queueToRestore(stored: QueueItem[], snapshot: RoomSnapshot): QueueItem[] {
+  return snapshot.myQueue.length === 0 ? stored : [];
+}
+
 export function pointerOf(view: RoomView): PlaybackPointer {
   return view.snapshot?.pointer ?? NULL_POINTER;
 }

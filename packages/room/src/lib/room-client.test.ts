@@ -18,6 +18,7 @@ import {
   peerPlaylistsOf,
   pointerOf,
   queueOf,
+  queueToRestore,
   reduce,
   registerPayload,
   sessionQueueOf,
@@ -310,6 +311,25 @@ describe("shared playlists", () => {
 
     const next = reduce(view, { type: "room-state", snapshot: snapshot() });
     expect(next.peerPlaylists).toBe(view.peerPlaylists);
+  });
+});
+
+describe("queueToRestore", () => {
+  const stored = [
+    { id: "i1", uri: "spotify:track:x", trackId: "x" },
+    { id: "i2", uri: "spotify:track:y", trackId: "y" },
+  ];
+
+  it("hands the stored queue back when the server has none", () => {
+    expect(queueToRestore(stored, snapshot())).toEqual(stored);
+  });
+
+  it("restores nothing when the server still holds a queue", () => {
+    expect(queueToRestore(stored, snapshot({ myQueue: [stored[0]] }))).toEqual([]);
+  });
+
+  it("restores nothing when there is nothing stored", () => {
+    expect(queueToRestore([], snapshot())).toEqual([]);
   });
 });
 

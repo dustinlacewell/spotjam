@@ -30,6 +30,7 @@ export {
   pointerOf,
   progressOf,
   queueOf,
+  queueToRestore,
   reduce,
   registerPayload,
   sessionQueueOf,
@@ -73,6 +74,10 @@ export {
   toSharedPlaylists,
 } from "./lib/playlists";
 export type { Playlist } from "./lib/playlists";
+
+// The local copy of a member's queue, so a server restart does not lose it.
+
+export { loadQueue, saveQueue } from "./lib/queue-store";
 
 // Drag and drop.
 
