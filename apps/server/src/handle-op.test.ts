@@ -1,4 +1,9 @@
-import { NULL_POINTER, type Op, type QueueItem } from "@spotjam/protocol";
+import {
+  NULL_POINTER,
+  type Op,
+  type QueueItem,
+  type SharedPlaylist,
+} from "@spotjam/protocol";
 import { describe, expect, it } from "vitest";
 
 import { handleOp, type OpContext } from "./handle-op.ts";
@@ -213,6 +218,59 @@ describe("handleOp", () => {
       );
       expect(outcome.error).toBe("malformed");
     }
+  });
+
+  it("stores well-formed public playlists", () => {
+    const playlists: SharedPlaylist[] = [
+      { id: "p1", name: "Morning", tracks: [{ uri: "spotify:track:a1", trackId: "a1" }] },
+      { id: "p2", name: "", tracks: [] },
+    ];
+
+    const outcome = handleOp(room(), ALICE, {
+      type: "set-public-playlists",
+      roomId: "jam",
+      playlists,
+    }, ctx);
+
+    expect(outcome.error).toBeUndefined();
+    expect(Room.publicPlaylistsOf(outcome.state, ALICE)).toEqual(playlists);
+    expect(Room.publicPlaylistsOf(outcome.state, BOB)).toEqual([]);
+  });
+
+  it("rejects malformed public playlists", () => {
+    const cases: unknown[] = [
+      "nope",
+      [{ name: "Morning", tracks: [] }],
+      [{ id: "p1", tracks: [] }],
+      [{ id: "p1", name: 7, tracks: [] }],
+      [{ id: "p1", name: "Morning" }],
+      [{ id: "p1", name: "Morning", tracks: "nope" }],
+      [{ id: "p1", name: "Morning", tracks: [{ uri: "spotify:track:a1" }] }],
+      [{ id: "p1", name: "Morning", tracks: [{ uri: "", trackId: "a1" }] }],
+      [null],
+    ];
+
+    for (const playlists of cases) {
+      const op = { type: "set-public-playlists", roomId: "jam", playlists } as unknown as Op;
+      expect(handleOp(room(), ALICE, op, ctx).error).toBe("malformed");
+    }
+  });
+
+  it("leaves a playlist read to the shell", () => {
+    const state = Room.setPublicPlaylists(room(), ALICE, [
+      { id: "p1", name: "Morning", tracks: [] },
+    ]);
+
+    const outcome = handleOp(state, BOB, {
+      type: "view-playlists",
+      roomId: "jam",
+      ownerPubkey: ALICE,
+    }, ctx);
+
+    expect(outcome.error).toBeUndefined();
+    expect(Room.publicPlaylistsOf(outcome.state, ALICE)).toEqual(
+      Room.publicPlaylistsOf(state, ALICE),
+    );
   });
 
   it("leaves membership ops to the shell", () => {

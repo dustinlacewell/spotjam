@@ -21,6 +21,7 @@ import type {
   RoomSnapshot,
   ServerEvent,
   SessionEntry,
+  SharedPlaylist,
 } from "@spotjam/protocol";
 
 import type { Connection } from "./connection";
@@ -30,6 +31,7 @@ import {
   myQueueOf,
   ops,
   participantsOf,
+  peerPlaylistsOf,
   pointerOf,
   progressOf,
   queueOf,
@@ -114,6 +116,9 @@ export class RoomClient implements Room {
   /** Only this room's news, filtered out of every event the connection sees. */
   #onEvent(event: ServerEvent): void {
     if (event.type === "room-state" && event.snapshot.roomId !== this.roomId) return;
+    // A shared connection may back more than one room; a playlist answer names
+    // the room it came from, so another room's must not fold into this view.
+    if (event.type === "playlists" && event.roomId !== this.roomId) return;
 
     if (event.type === "room-state" && !this.#view.status.synced) {
       console.info("spotjam: first snapshot", event.snapshot.roomId);
@@ -276,6 +281,22 @@ export class RoomClient implements Room {
 
   clearMyQueue(): void {
     this.#sendOp(ops.clearQueue(this.roomId));
+  }
+
+  // --- shared playlists ----------------------------------------------
+
+  /** Replace the room's copy of our public set. The whole set, every time. */
+  setPublicPlaylists(playlists: SharedPlaylist[]): void {
+    this.#sendOp(ops.setPublicPlaylists(this.roomId, playlists));
+  }
+
+  /** Ask for one member's public playlists. The answer arrives as an event. */
+  viewPlaylists(ownerPubkey: PublicKeyHex): void {
+    this.#sendOp(ops.viewPlaylists(this.roomId, ownerPubkey));
+  }
+
+  playlistsOf(ownerPubkey: PublicKeyHex): SharedPlaylist[] {
+    return peerPlaylistsOf(this.#view, ownerPubkey);
   }
 
   // --- playback ------------------------------------------------------

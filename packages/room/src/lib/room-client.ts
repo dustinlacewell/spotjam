@@ -20,6 +20,7 @@ import {
   type RoomSnapshot,
   type ServerEvent,
   type SessionEntry,
+  type SharedPlaylist,
 } from "@spotjam/protocol";
 
 import type { ParsedTrack } from "./spotify-link";
@@ -54,6 +55,13 @@ export interface RoomView {
   status: ConnectionStatus;
   /** The most recent typed error the server sent, or null. */
   lastError: RoomError | null;
+  /**
+   * Other members' public playlists, as last answered, keyed by their owner.
+   *
+   * The server sends these only when asked, so a key is absent until this
+   * client views that person's page.
+   */
+  peerPlaylists: Record<PublicKeyHex, SharedPlaylist[]>;
 }
 
 /** A server error, narrowed to what the UI needs to say about it. */
@@ -70,6 +78,7 @@ export const INITIAL_VIEW: RoomView = {
   snapshot: null,
   status: { socket: "connecting", synced: false },
   lastError: null,
+  peerPlaylists: {},
 };
 
 // ---------------------------------------------------------------------------
@@ -117,6 +126,16 @@ export const ops = {
     positionMs: Math.max(0, Math.round(positionMs)),
   }),
   skip: (roomId: string): Op => ({ type: "skip", roomId }),
+  setPublicPlaylists: (roomId: string, playlists: SharedPlaylist[]): Op => ({
+    type: "set-public-playlists",
+    roomId,
+    playlists,
+  }),
+  viewPlaylists: (roomId: string, ownerPubkey: PublicKeyHex): Op => ({
+    type: "view-playlists",
+    roomId,
+    ownerPubkey,
+  }),
   reportProgress: (
     roomId: string,
     sample: {
@@ -163,6 +182,7 @@ export function isServerEvent(value: unknown): value is ServerEvent {
     type === "registered" ||
     type === "room-list" ||
     type === "room-detail" ||
+    type === "playlists" ||
     type === "error"
   );
 }
@@ -195,6 +215,10 @@ export function reduce(view: RoomView, event: ServerEvent): RoomView {
         // A good snapshot means the room is working; a stale error would
         // otherwise sit in the UI forever.
         lastError: null,
+        // Someone who left takes their playlists with them. Keeping the copy
+        // would show a rejoiner the set they had last time, since a rejoin
+        // starts the room's own copy empty again.
+        peerPlaylists: retainMembers(view.peerPlaylists, event.snapshot.participants),
       };
 
     case "registered":
@@ -212,9 +236,27 @@ export function reduce(view: RoomView, event: ServerEvent): RoomView {
       // member's own view, whose `myQueue` a watcher's snapshot does not have.
       return view;
 
+    case "playlists":
+      return {
+        ...view,
+        peerPlaylists: { ...view.peerPlaylists, [event.ownerPubkey]: event.playlists },
+      };
+
     case "error":
       return { ...view, lastError: describeError(event.code, event.message) };
   }
+}
+
+/** Keep only the cached playlist sets whose owner is still in the room. */
+function retainMembers(
+  cached: Record<PublicKeyHex, SharedPlaylist[]>,
+  participants: Participant[],
+): Record<PublicKeyHex, SharedPlaylist[]> {
+  const present = new Set(participants.map((p) => p.pubkey));
+  const kept = Object.entries(cached).filter(([pubkey]) => present.has(pubkey));
+  // Same contents means same object, so the shell can skip a re-render.
+  if (kept.length === Object.keys(cached).length) return cached;
+  return Object.fromEntries(kept);
 }
 
 /**
@@ -286,6 +328,16 @@ export function progressOf(view: RoomView): Progress | null {
  */
 export function queueOf(view: RoomView, pubkey: PublicKeyHex, me: PublicKeyHex): QueueItem[] {
   return pubkey === me ? myQueueOf(view) : [];
+}
+
+/**
+ * One member's public playlists, as last answered.
+ *
+ * Empty until this client has asked for them, which is the same as that member
+ * sharing nothing — both mean "there is nothing of theirs to show".
+ */
+export function peerPlaylistsOf(view: RoomView, pubkey: PublicKeyHex): SharedPlaylist[] {
+  return view.peerPlaylists[pubkey] ?? [];
 }
 
 export function isBroadcasting(view: RoomView, me: PublicKeyHex): boolean {

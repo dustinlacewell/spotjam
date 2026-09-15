@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Mark, Pill, StatusDot, type StatusDotTone } from "@spotjam/ui";
 import type {
   Participant,
   PlaybackPointer,
   QueueItem,
   SessionEntry,
+  SharedPlaylist,
 } from "@spotjam/protocol";
+import type { Playlist } from "../lib/playlists";
 import type { ConnectionStatus } from "../lib/room-client";
 import type { Room } from "../ports/room";
 import { toQueueItems } from "../lib/room-client";
+import { toSharedPlaylists } from "../lib/playlists";
 import { displayedProgress } from "../lib/progress";
 import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import { useRoomServices } from "../services";
@@ -53,6 +56,24 @@ export function QueueView({
 
   const { importStatus, startImports } = usePlaylistImport(onImported);
 
+  usePublishedPlaylists(room, playlistsApi.playlists, status.synced);
+
+  // Opening someone else's page asks the room for their public playlists. The
+  // answer lands on the room and re-renders us through useRoomSnapshot.
+  //
+  // The ask needs a joined room, so it waits for sync; before that the server
+  // refuses it as `not-in-room` and nothing retries. It also re-runs when the
+  // owner's revision moves, which is how a viewer learns their copy went stale
+  // — the playlists themselves are never in the snapshot.
+  const synced = status.synced;
+  const revisionOfSelected = revisionOf(participants, selection);
+  useEffect(() => {
+    if (!synced) return;
+    if (selection === "session" || selection === myPubkey) return;
+    if (revisionOfSelected < 0) return;
+    room.viewPlaylists(selection);
+  }, [room, selection, myPubkey, synced, revisionOfSelected]);
+
   const broadcasting = room.isBroadcasting();
   const ownerName = nameOf(participants, pointer.ownerPubkey);
   const currentItem = currentItemOf(pointer);
@@ -65,6 +86,7 @@ export function QueueView({
     queueOf,
     broadcasting,
     ownerNameFor: (pubkey) => nameOf(participants, pubkey),
+    playlistsFor: (pubkey) => room.playlistsOf(pubkey),
   });
 
   function appendTracks(tracks: ParsedTrack[]) {
@@ -89,7 +111,7 @@ export function QueueView({
         <div className={styles.headerRight}>
           <Pill as="span">
             <StatusDot tone={statusTone(status)} />
-            {statusLabel(status, participants.length)}
+            {statusLabel(status)}
           </Pill>
           <BroadcastToggle
             broadcasting={broadcasting}
@@ -108,6 +130,7 @@ export function QueueView({
       <div className={styles.body}>
         <Sidebar
           participants={participants}
+          sessionQueue={sessionQueue}
           playingOwnerPubkey={pointer.ownerPubkey}
           selection={selection}
           onSelect={(next) => {
@@ -174,6 +197,7 @@ function queueSourceOf(
     queueOf: (pubkey: string) => QueueItem[];
     broadcasting: boolean;
     ownerNameFor: (pubkey: string) => string;
+    playlistsFor: (pubkey: string) => SharedPlaylist[];
   },
 ): QueueSource {
   if (selection === "session") {
@@ -186,7 +210,43 @@ function queueSourceOf(
     kind: "other",
     items: room.queueOf(selection),
     ownerName: room.ownerNameFor(selection),
+    playlists: room.playlistsFor(selection),
   };
+}
+
+/**
+ * Keep the room's copy of our public playlists in step with ours.
+ *
+ * The op is a full replace, so it is sent only when the shared set actually
+ * changes — not on every render, and not for a private playlist's edits, which
+ * the room never sees. The first send waits for sync: an op before the join
+ * lands has no room to apply to.
+ */
+function usePublishedPlaylists(room: Room, playlists: Playlist[], synced: boolean): void {
+  const shared = useMemo(() => toSharedPlaylists(playlists), [playlists]);
+  const sentRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!synced) {
+      // A rejoin starts the room's copy empty again, so the next send must go
+      // out even when the set itself did not move.
+      sentRef.current = null;
+      return;
+    }
+    const encoded = JSON.stringify(shared);
+    if (sentRef.current === encoded) return;
+    sentRef.current = encoded;
+    room.setPublicPlaylists(shared);
+  }, [room, shared, synced]);
+}
+
+/**
+ * The selected member's playlists revision, or -1 when there is no member to
+ * ask about — no selection, our own page, or someone who has left.
+ */
+function revisionOf(participants: Participant[], selection: Selection): number {
+  if (selection === "session") return -1;
+  return participants.find((p) => p.pubkey === selection)?.playlistsRevision ?? -1;
 }
 
 function nameOf(participants: Participant[], pubkey: string | null): string {
@@ -274,11 +334,11 @@ function statusTone(status: ConnectionStatus): StatusDotTone {
   return "muted";
 }
 
-function statusLabel(status: ConnectionStatus, listeners: number): string {
+function statusLabel(status: ConnectionStatus): string {
   if (status.socket === "disconnected") return "disconnected";
   if (status.socket === "connecting") return "connecting";
   // Socket up, no snapshot yet: the handshake is mid-flight. Saying
   // "connecting" here hid which half was stuck.
   if (!status.synced) return "joining";
-  return listeners === 1 ? "Connected" : `${listeners} listening`;
+  return "Connected";
 }

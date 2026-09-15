@@ -7,7 +7,9 @@ import {
   deletePlaylist,
   removeTrackFromPlaylist,
   renamePlaylist,
+  setPlaylistPublic,
   shufflePlaylist,
+  toSharedPlaylists,
   type Playlist,
 } from "./playlists";
 
@@ -16,8 +18,8 @@ const TRACK_B: ParsedTrack = { uri: "spotify:track:bbbb2222", trackId: "bbbb2222
 
 function lists(): Playlist[] {
   return [
-    { id: "one", name: "Morning", tracks: [TRACK_A] },
-    { id: "two", name: "Evening", tracks: [] },
+    { id: "one", name: "Morning", tracks: [TRACK_A], isPublic: false },
+    { id: "two", name: "Evening", tracks: [], isPublic: false },
   ];
 }
 
@@ -25,7 +27,12 @@ describe("createPlaylistWithTracks", () => {
   it("appends a playlist that already holds the tracks", () => {
     const next = createPlaylistWithTracks(lists(), "Imported", [TRACK_A, TRACK_B], "three");
     expect(next).toHaveLength(3);
-    expect(next[2]).toEqual({ id: "three", name: "Imported", tracks: [TRACK_A, TRACK_B] });
+    expect(next[2]).toEqual({
+      id: "three",
+      name: "Imported",
+      tracks: [TRACK_A, TRACK_B],
+      isPublic: false,
+    });
   });
 
   it("allows a name that already exists", () => {
@@ -51,7 +58,11 @@ describe("createPlaylist", () => {
   it("appends a playlist with the given id and trimmed name", () => {
     const next = createPlaylist(lists(), "  Late night  ", "three");
     expect(next).toHaveLength(3);
-    expect(next[2]).toEqual({ id: "three", name: "Late night", tracks: [] });
+    expect(next[2]).toEqual({ id: "three", name: "Late night", tracks: [], isPublic: false });
+  });
+
+  it("creates a playlist private", () => {
+    expect(createPlaylist(lists(), "Secret", "three")[2].isPublic).toBe(false);
   });
 
   it("falls back to Untitled for a blank name", () => {
@@ -160,6 +171,48 @@ describe("shufflePlaylist", () => {
     expect(shufflePlaylist(lists(), "one")).toEqual(lists());
     expect(shufflePlaylist(lists(), "two")).toEqual(lists());
     expect(shufflePlaylist(lists(), "missing")).toEqual(lists());
+  });
+});
+
+describe("setPlaylistPublic", () => {
+  it("sets the flag on the named playlist and never mutates", () => {
+    const before = lists();
+    const next = setPlaylistPublic(before, "one", true);
+    expect(next[0].isPublic).toBe(true);
+    expect(before[0].isPublic).toBe(false);
+  });
+
+  it("takes a public playlist back", () => {
+    const shared = setPlaylistPublic(lists(), "one", true);
+    expect(setPlaylistPublic(shared, "one", false)[0].isPublic).toBe(false);
+  });
+
+  it("leaves other playlists alone", () => {
+    expect(setPlaylistPublic(lists(), "one", true)[1]).toEqual(lists()[1]);
+  });
+
+  it("returns the same array for an unknown id or an unchanged flag", () => {
+    const before = lists();
+    expect(setPlaylistPublic(before, "missing", true)).toEqual(lists());
+    expect(setPlaylistPublic(before, "one", false)[0]).toBe(before[0]);
+  });
+});
+
+describe("toSharedPlaylists", () => {
+  it("keeps only the public ones, in the wire shape", () => {
+    const shared = toSharedPlaylists(setPlaylistPublic(lists(), "one", true));
+    expect(shared).toEqual([
+      { id: "one", name: "Morning", tracks: [{ uri: TRACK_A.uri, trackId: TRACK_A.trackId }] },
+    ]);
+  });
+
+  it("is empty when nothing is public", () => {
+    expect(toSharedPlaylists(lists())).toEqual([]);
+  });
+
+  it("carries a public playlist with no tracks", () => {
+    const shared = toSharedPlaylists(setPlaylistPublic(lists(), "two", true));
+    expect(shared).toEqual([{ id: "two", name: "Evening", tracks: [] }]);
   });
 });
 

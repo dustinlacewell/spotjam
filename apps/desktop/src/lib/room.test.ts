@@ -512,7 +512,14 @@ describe("RoomClient snapshots", () => {
     latest().deliver({
       type: "room-state",
       snapshot: snapshot({
-        participants: [{ pubkey: room.myPubkey, username: "alice", broadcasting: true }],
+        participants: [
+          {
+            pubkey: room.myPubkey,
+            username: "alice",
+            broadcasting: true,
+            playlistsRevision: 0,
+          },
+        ],
         sessionQueue: [entry],
         myQueue: [entry.item],
         pointer: { ...NULL_POINTER, itemId: "a1", uri: "ua1", ownerPubkey: room.myPubkey },

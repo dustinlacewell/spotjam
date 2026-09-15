@@ -17,6 +17,7 @@ import {
   type PublicKeyHex,
   type QueueItem,
   type SessionEntry,
+  type SharedPlaylist,
 } from "@spotjam/protocol";
 
 import type { ConnectionStatus, RoomError } from "../lib/room-client";
@@ -45,6 +46,8 @@ export interface MockParticipant {
   username: string;
   broadcasting: boolean;
   queue: QueueItem[];
+  /** What this person shares with the room. Default none. */
+  publicPlaylists?: SharedPlaylist[];
 }
 
 /** Where playback starts, for one seeded item. */
@@ -83,6 +86,10 @@ export class MockRoom implements Room {
 
   #state: MockState;
   #durations: Map<string, number>;
+  /** The room's copy of everyone's public playlists, keyed by owner. */
+  readonly #playlists = new Map<PublicKeyHex, SharedPlaylist[]>();
+  /** How many times each owner has replaced their set. Seeding does not count. */
+  readonly #revisions = new Map<PublicKeyHex, number>();
 
   readonly #clock: () => number;
   readonly #rng: () => number;
@@ -94,6 +101,11 @@ export class MockRoom implements Room {
     this.#clock = seed.clock ?? Date.now;
     this.#rng = seed.rng ?? Math.random;
     this.#durations = new Map(Object.entries(seed.durations ?? {}));
+    for (const participant of seed.participants) {
+      if (participant.publicPlaylists) {
+        this.#playlists.set(participant.pubkey, participant.publicPlaylists);
+      }
+    }
     this.#state = seedState(seed);
     this.#state = startPlayback(this.#state, seed, this.#clock(), this.#durations);
   }
@@ -124,7 +136,12 @@ export class MockRoom implements Room {
   // --- reading the room ----------------------------------------------
 
   participants(): Participant[] {
-    return listParticipants(this.#state);
+    // Revisions live beside the playlists themselves, not on MockMember, so
+    // they are layered on here rather than threaded through session-queue.
+    return listParticipants(this.#state).map((participant) => ({
+      ...participant,
+      playlistsRevision: this.#revisions.get(participant.pubkey) ?? 0,
+    }));
   }
 
   sessionQueue(): SessionEntry[] {
@@ -220,6 +237,26 @@ export class MockRoom implements Room {
     this.#mapMyQueue(() => []);
   }
 
+  // --- shared playlists ----------------------------------------------
+
+  setPublicPlaylists(playlists: SharedPlaylist[]): void {
+    this.#playlists.set(this.myPubkey, [...playlists]);
+    this.#revisions.set(this.myPubkey, (this.#revisions.get(this.myPubkey) ?? 0) + 1);
+    this.#emitChange();
+  }
+
+  /**
+   * A mock room already holds every member's set, so there is nothing to ask
+   * for. The call stays on the port so the UI is written the same either way.
+   */
+  viewPlaylists(_ownerPubkey: PublicKeyHex): void {
+    // Answered synchronously by playlistsOf.
+  }
+
+  playlistsOf(ownerPubkey: PublicKeyHex): SharedPlaylist[] {
+    return this.#playlists.get(ownerPubkey) ?? [];
+  }
+
   // --- playback ------------------------------------------------------
 
   setBroadcasting(on: boolean): void {
@@ -260,6 +297,10 @@ export class MockRoom implements Room {
    */
   #commit(next: MockState): void {
     this.#state = settleStart(next, this.#clock());
+    this.#emitChange();
+  }
+
+  #emitChange(): void {
     for (const listener of this.#changeListeners) listener();
   }
 

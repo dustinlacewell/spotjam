@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { NULL_POINTER, type RoomSnapshot, type ServerEvent } from "@spotjam/protocol";
+import {
+  NULL_POINTER,
+  type RoomSnapshot,
+  type ServerEvent,
+  type SharedPlaylist,
+} from "@spotjam/protocol";
 import {
   INITIAL_VIEW,
   backoffMs,
@@ -10,6 +15,7 @@ import {
   ops,
   parseServerEvent,
   participantsOf,
+  peerPlaylistsOf,
   pointerOf,
   queueOf,
   reduce,
@@ -29,8 +35,8 @@ function snapshot(overrides: Partial<RoomSnapshot> = {}): RoomSnapshot {
   return {
     roomId: ROOM,
     participants: [
-      { pubkey: ME, username: "alice", broadcasting: true },
-      { pubkey: THEM, username: "bob", broadcasting: false },
+      { pubkey: ME, username: "alice", broadcasting: true, playlistsRevision: 0 },
+      { pubkey: THEM, username: "bob", broadcasting: false, playlistsRevision: 0 },
     ],
     sessionQueue: [],
     myQueue: [],
@@ -216,6 +222,94 @@ describe("reading the view", () => {
     expect(usernameOf(view, ME)).toBe("alice");
     expect(usernameOf(view, "cc".repeat(32))).toBe("someone");
     expect(usernameOf(view, null)).toBe("someone");
+  });
+});
+
+describe("shared playlists", () => {
+  const MORNING: SharedPlaylist = {
+    id: "p1",
+    name: "Morning",
+    tracks: [{ uri: "spotify:track:aaaa1111", trackId: "aaaa1111" }],
+  };
+  const EVENING: SharedPlaylist = { id: "p2", name: "Evening", tracks: [] };
+
+  function playlistsEvent(owner: string, playlists: SharedPlaylist[]): ServerEvent {
+    return { type: "playlists", roomId: ROOM, ownerPubkey: owner, playlists };
+  }
+
+  it("builds a full-replace set-public-playlists op", () => {
+    expect(ops.setPublicPlaylists(ROOM, [MORNING])).toEqual({
+      type: "set-public-playlists",
+      roomId: ROOM,
+      playlists: [MORNING],
+    });
+  });
+
+  it("builds a view-playlists op naming the owner", () => {
+    expect(ops.viewPlaylists(ROOM, THEM)).toEqual({
+      type: "view-playlists",
+      roomId: ROOM,
+      ownerPubkey: THEM,
+    });
+  });
+
+  it("accepts a playlists frame as a server event", () => {
+    const raw = JSON.stringify(playlistsEvent(THEM, [MORNING]));
+    expect(parseServerEvent(raw)).toEqual(playlistsEvent(THEM, [MORNING]));
+  });
+
+  it("starts with nobody's playlists known", () => {
+    expect(INITIAL_VIEW.peerPlaylists).toEqual({});
+    expect(peerPlaylistsOf(INITIAL_VIEW, THEM)).toEqual([]);
+  });
+
+  it("folds a playlists event in under its owner", () => {
+    const view = reduce(INITIAL_VIEW, playlistsEvent(THEM, [MORNING]));
+    expect(peerPlaylistsOf(view, THEM)).toEqual([MORNING]);
+    expect(peerPlaylistsOf(view, ME)).toEqual([]);
+  });
+
+  it("replaces one owner's set without touching another's", () => {
+    const first = reduce(INITIAL_VIEW, playlistsEvent(THEM, [MORNING]));
+    const second = reduce(first, playlistsEvent(ME, [EVENING]));
+    const third = reduce(second, playlistsEvent(THEM, []));
+
+    expect(peerPlaylistsOf(third, THEM)).toEqual([]);
+    expect(peerPlaylistsOf(third, ME)).toEqual([EVENING]);
+  });
+
+  it("leaves the snapshot and the error alone", () => {
+    const view = viewOf(snapshot());
+    const next = reduce(view, playlistsEvent(THEM, [MORNING]));
+    expect(next.snapshot).toBe(view.snapshot);
+    expect(next.lastError).toBe(view.lastError);
+  });
+
+  it("drops a cached set when its owner is gone from the snapshot", () => {
+    let view = viewOf(snapshot());
+    view = reduce(view, playlistsEvent(THEM, [MORNING]));
+    view = reduce(view, playlistsEvent(ME, [EVENING]));
+
+    const alone = reduce(view, {
+      type: "room-state",
+      snapshot: snapshot({
+        participants: [
+          { pubkey: ME, username: "alice", broadcasting: true, playlistsRevision: 0 },
+        ],
+      }),
+    });
+
+    // A rejoiner starts the server's copy empty, so a kept copy would be stale.
+    expect(peerPlaylistsOf(alone, THEM)).toEqual([]);
+    expect(peerPlaylistsOf(alone, ME)).toEqual([EVENING]);
+  });
+
+  it("keeps the cache object identical when everyone is still present", () => {
+    let view = viewOf(snapshot());
+    view = reduce(view, playlistsEvent(THEM, [MORNING]));
+
+    const next = reduce(view, { type: "room-state", snapshot: snapshot() });
+    expect(next.peerPlaylists).toBe(view.peerPlaylists);
   });
 });
 

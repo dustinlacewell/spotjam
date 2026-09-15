@@ -207,6 +207,11 @@ export class Session {
       return;
     }
 
+    if (op.type === "view-playlists") {
+      this.#viewPlaylists(connection, op.roomId, op.ownerPubkey);
+      return;
+    }
+
     const { rooms, clock, rng } = this.#deps;
     const outcome = handleOp(rooms.get(op.roomId), pubkey, op, { now: clock.now(), rng });
     rooms.commit(outcome.state);
@@ -216,6 +221,22 @@ export class Session {
       return;
     }
     this.#publish(op.roomId);
+  }
+
+  /**
+   * Answer one member's playlists to the asker alone.
+   *
+   * A read, so nothing is published: the room did not move, and the other
+   * members have no interest in what this one is browsing. An owner nobody
+   * knows simply offers nothing.
+   */
+  #viewPlaylists(connection: Connection, roomId: string, ownerPubkey: unknown): void {
+    if (typeof ownerPubkey !== "string" || ownerPubkey.length === 0) {
+      send(connection, error("malformed", "Op is missing an owner key."));
+      return;
+    }
+    const playlists = Room.publicPlaylistsOf(this.#deps.rooms.get(roomId), ownerPubkey);
+    send(connection, { type: "playlists", roomId, ownerPubkey, playlists });
   }
 
   /** A query needs an authenticated key but no room membership. */

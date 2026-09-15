@@ -4,6 +4,8 @@
 // key authored it. Ops never carry an author field: the envelope's pubkey is
 // the author, and a payload that claimed otherwise would simply be ignored.
 
+import type { PublicKeyHex } from "./identity.js";
+
 /** A track queued by someone, as it exists in a room. */
 export interface QueueItem {
   /** Fresh per add; identifies this entry, not the track. */
@@ -101,6 +103,33 @@ export interface ReportProgressOp {
   sampledAtEpochMs: number;
 }
 
+/** One track inside a shared playlist. No queue identity; that is minted on enqueue. */
+export interface PlaylistTrack {
+  uri: string;
+  trackId: string;
+}
+
+/** A playlist as its owner shows it to the room. */
+export interface SharedPlaylist {
+  id: string;
+  name: string;
+  tracks: PlaylistTrack[];
+}
+
+/** Replace the sender's public playlists. The full set every time, never a patch. */
+export interface SetPublicPlaylistsOp {
+  type: "set-public-playlists";
+  roomId: string;
+  playlists: SharedPlaylist[];
+}
+
+/** Ask for one member's public playlists. Answered with a `playlists` event to the sender only. */
+export interface ViewPlaylistsOp {
+  type: "view-playlists";
+  roomId: string;
+  ownerPubkey: PublicKeyHex;
+}
+
 export type Op =
   | JoinRoomOp
   | LeaveRoomOp
@@ -114,7 +143,9 @@ export type Op =
   | SetPausedOp
   | SeekOp
   | SkipOp
-  | ReportProgressOp;
+  | ReportProgressOp
+  | SetPublicPlaylistsOp
+  | ViewPlaylistsOp;
 
 export type OpType = Op["type"];
 
@@ -132,6 +163,8 @@ const OP_TYPES: ReadonlySet<string> = new Set<OpType>([
   "seek",
   "skip",
   "report-progress",
+  "set-public-playlists",
+  "view-playlists",
 ]);
 
 /** Structural check only; the server still validates fields per op type. */

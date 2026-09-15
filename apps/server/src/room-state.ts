@@ -14,6 +14,7 @@ import {
   type QueueItem,
   type RoomSnapshot,
   type SessionEntry,
+  type SharedPlaylist,
 } from "@spotjam/protocol";
 
 import type { Rng } from "./ports.ts";
@@ -26,6 +27,10 @@ export interface Member {
   queue: QueueItem[];
   /** Newest playback sample this member reported, if any. */
   progress: Progress | null;
+  /** Playlists this member offers the room. Replaced whole, never patched. */
+  publicPlaylists: readonly SharedPlaylist[];
+  /** Bumps on every replace, so viewers can tell their copy went stale. */
+  playlistsRevision: number;
 }
 
 /**
@@ -76,6 +81,8 @@ export function join(
     broadcasting: false,
     queue: [],
     progress: null,
+    publicPlaylists: [],
+    playlistsRevision: 0,
   };
   const members = new Map(state.members);
   members.set(pubkey, member);
@@ -187,6 +194,39 @@ export function shuffle(state: RoomState, pubkey: PublicKeyHex, rng: Rng): RoomS
 
 export function clearQueue(state: RoomState, pubkey: PublicKeyHex): RoomState {
   return mapQueue(state, pubkey, () => []);
+}
+
+// ---------------------------------------------------------------------------
+// Public playlists — what a member offers, read on demand rather than broadcast
+// ---------------------------------------------------------------------------
+
+/**
+ * Replace a member's public playlists.
+ *
+ * They stay out of the snapshot: a room full of people each holding hundreds of
+ * playlists would dwarf the queue, and nobody looks at more than one at a time.
+ * A viewer asks, and only the asker is answered.
+ */
+export function setPublicPlaylists(
+  state: RoomState,
+  pubkey: PublicKeyHex,
+  playlists: readonly SharedPlaylist[],
+): RoomState {
+  const member = state.members.get(pubkey);
+  if (member === undefined) return state;
+  return withMember(state, {
+    ...member,
+    publicPlaylists: [...playlists],
+    playlistsRevision: member.playlistsRevision + 1,
+  });
+}
+
+/** What one member offers. An unknown member offers nothing; that is not an error. */
+export function publicPlaylistsOf(
+  state: RoomState,
+  pubkey: PublicKeyHex,
+): SharedPlaylist[] {
+  return [...(state.members.get(pubkey)?.publicPlaylists ?? [])];
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +393,7 @@ function listParticipants(state: RoomState): Participant[] {
     pubkey: member.pubkey,
     username: member.username,
     broadcasting: member.broadcasting,
+    playlistsRevision: member.playlistsRevision,
   }));
 }
 

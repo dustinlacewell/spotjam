@@ -62,6 +62,8 @@ export function listParticipants(state: MockState): Participant[] {
     pubkey: member.pubkey,
     username: member.username,
     broadcasting: member.broadcasting,
+    // MockRoom owns the real counts and layers them over this projection.
+    playlistsRevision: 0,
   }));
 }
 

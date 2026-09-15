@@ -85,8 +85,8 @@ describe("listParticipants", () => {
   it("projects pubkey, name and broadcasting, in turn order", () => {
     const s = state([member("a", true, ["x"]), member("b", false, [])]);
     expect(listParticipants(s)).toEqual([
-      { pubkey: "a", username: "a", broadcasting: true },
-      { pubkey: "b", username: "b", broadcasting: false },
+      { pubkey: "a", username: "a", broadcasting: true, playlistsRevision: 0 },
+      { pubkey: "b", username: "b", broadcasting: false, playlistsRevision: 0 },
     ]);
   });
 });

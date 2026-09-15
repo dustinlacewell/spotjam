@@ -7,6 +7,7 @@ import {
   deletePlaylist,
   removeTrackFromPlaylist,
   renamePlaylist,
+  setPlaylistPublic,
   shufflePlaylist,
   type Playlist,
 } from "../lib/playlists";
@@ -22,6 +23,8 @@ export interface PlaylistsApi {
   addTracks(id: string, tracks: ParsedTrack[]): void;
   removeTrack(id: string, index: number): void;
   shuffle(id: string): void;
+  /** Shares a playlist with the room, or takes it back. */
+  setPublic(id: string, isPublic: boolean): void;
 }
 
 /**
@@ -67,5 +70,9 @@ export function usePlaylists(): PlaylistsApi {
       [apply],
     ),
     shuffle: useCallback((id: string) => apply((l) => shufflePlaylist(l, id)), [apply]),
+    setPublic: useCallback(
+      (id: string, isPublic: boolean) => apply((l) => setPlaylistPublic(l, id, isPublic)),
+      [apply],
+    ),
   };
 }

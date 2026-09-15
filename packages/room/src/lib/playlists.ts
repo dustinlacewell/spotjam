@@ -1,3 +1,4 @@
+import type { SharedPlaylist } from "@spotjam/protocol";
 import type { ParsedTrack } from "./spotify-link";
 import { shuffled } from "./shuffle";
 
@@ -5,6 +6,8 @@ export interface Playlist {
   id: string;
   name: string;
   tracks: ParsedTrack[];
+  /** Public playlists are visible to everyone else in the room. */
+  isPublic: boolean;
 }
 
 /**
@@ -20,6 +23,7 @@ export function createPlaylist(lists: Playlist[], name: string, id?: string): Pl
       id: id ?? crypto.randomUUID(),
       name: trimmed || "Untitled",
       tracks: [],
+      isPublic: false,
     },
   ];
 }
@@ -71,6 +75,27 @@ export function removeTrackFromPlaylist(lists: Playlist[], id: string, index: nu
     if (index < 0 || index >= list.tracks.length) return list;
     return { ...list, tracks: list.tracks.filter((_, at) => at !== index) };
   });
+}
+
+/** Publish a playlist to the room, or take it back. */
+export function setPlaylistPublic(lists: Playlist[], id: string, isPublic: boolean): Playlist[] {
+  return mapList(lists, id, (list) => (list.isPublic === isPublic ? list : { ...list, isPublic }));
+}
+
+/**
+ * The public playlists, in the wire shape the room server holds.
+ *
+ * Private ones never leave this install, so they are dropped here rather than
+ * filtered somewhere downstream.
+ */
+export function toSharedPlaylists(lists: Playlist[]): SharedPlaylist[] {
+  return lists
+    .filter((list) => list.isPublic)
+    .map((list) => ({
+      id: list.id,
+      name: list.name,
+      tracks: list.tracks.map((track) => ({ uri: track.uri, trackId: track.trackId })),
+    }));
 }
 
 function mapList(

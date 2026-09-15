@@ -5,7 +5,13 @@
 // is the only thing a client gets to choose. An op that named someone else's
 // queue could not express it — there is no field for it.
 
-import type { ErrorEvent, Op, QueueItem } from "@spotjam/protocol";
+import type {
+  ErrorEvent,
+  Op,
+  PlaylistTrack,
+  QueueItem,
+  SharedPlaylist,
+} from "@spotjam/protocol";
 
 import type { Rng } from "./ports.ts";
 import * as Room from "./room-state.ts";
@@ -119,6 +125,18 @@ function applyOp(
           sampledAtEpochMs: op.sampledAtEpochMs,
         }),
       };
+
+    case "set-public-playlists": {
+      if (!Array.isArray(op.playlists) || !op.playlists.every(isSharedPlaylist)) {
+        return malformed(state);
+      }
+      return { state: Room.setPublicPlaylists(state, pubkey, op.playlists) };
+    }
+
+    case "view-playlists":
+      // A read, answered to the asker alone. The shell handles it before the
+      // state path, so reaching here would change nothing anyway.
+      return { state };
   }
 }
 
@@ -141,5 +159,22 @@ function isQueueItem(value: unknown): value is QueueItem {
     isNonEmptyString(item.id) &&
     isNonEmptyString(item.uri) &&
     isNonEmptyString(item.trackId)
+  );
+}
+
+function isPlaylistTrack(value: unknown): value is PlaylistTrack {
+  if (typeof value !== "object" || value === null) return false;
+  const track = value as Record<string, unknown>;
+  return isNonEmptyString(track.uri) && isNonEmptyString(track.trackId);
+}
+
+function isSharedPlaylist(value: unknown): value is SharedPlaylist {
+  if (typeof value !== "object" || value === null) return false;
+  const playlist = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(playlist.id) &&
+    typeof playlist.name === "string" &&
+    Array.isArray(playlist.tracks) &&
+    playlist.tracks.every(isPlaylistTrack)
   );
 }

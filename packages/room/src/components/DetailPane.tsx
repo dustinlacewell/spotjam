@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { SharedPlaylist } from "@spotjam/protocol";
+import type { Playlist } from "../lib/playlists";
 import type { ParsedLinks, ParsedTrack } from "../lib/spotify-link";
 import type { PlaylistsApi } from "./use-playlists";
 import { PlaylistList } from "./PlaylistList";
@@ -10,8 +12,8 @@ import styles from "./PlaylistsPanel.module.css";
 /**
  * One detail page: a list of the owner's playlists with their live queue pinned
  * at the top, and whichever of those is selected filling the pane beside it.
- * Another person's page shows the same shape read-only — we hold no playlists
- * but our own, so theirs is the queue row alone.
+ * Another person's page shows the same shape read-only, listing whichever of
+ * their playlists they made public.
  */
 export function DetailPane({
   api,
@@ -48,14 +50,17 @@ export function DetailPane({
   onClear: () => void;
   importStatus: string | null;
 }) {
-  const { playlists, create, remove, rename, addTracks, removeTrack, shuffle } = api;
+  const { playlists, create, remove, rename, addTracks, removeTrack, shuffle, setPublic } = api;
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [pendingName, setPendingName] = useState<string | null>(null);
 
-  // Playlists are ours wherever we are, so the session page keeps them. Another
-  // person's page holds none of ours: their queue row stands alone, read-only.
+  // Our own page lists our playlists; someone else's lists whichever of theirs
+  // the room holds, which is only the ones they made public.
   const readOnly = queue.kind === "other";
-  const visiblePlaylists = readOnly ? [] : playlists;
+  const visiblePlaylists = useMemo(
+    () => (queue.kind === "other" ? queue.playlists.map(asPlaylist) : playlists),
+    [queue, playlists],
+  );
   const openPlaylist = visiblePlaylists.find((p) => p.id === selected) ?? null;
 
   // A new playlist opens selected and in rename mode once the hook's state lands.
@@ -80,6 +85,7 @@ export function DetailPane({
       <PlaylistList
         playlists={visiblePlaylists}
         queueCount={countOf(queue)}
+        queueLabel={queue.kind === "other" ? `${queue.ownerName}'s queue` : "Your queue"}
         selected={selected}
         renamingId={renamingId}
         readOnly={readOnly}
@@ -101,11 +107,13 @@ export function DetailPane({
       {openPlaylist ? (
         <PlaylistTracks
           playlist={openPlaylist}
+          readOnly={readOnly}
           onLinks={(links) => onLinks(links, (tracks) => addTracks(openPlaylist.id, tracks))}
           onRemoveTrack={(index) => removeTrack(openPlaylist.id, index)}
           onAddToQueue={() => onAddToQueue(openPlaylist.tracks)}
           onReplaceQueue={() => onReplaceQueue(openPlaylist.tracks)}
           onShuffle={() => shuffle(openPlaylist.id)}
+          onSetPublic={(isPublic) => setPublic(openPlaylist.id, isPublic)}
           importStatus={importStatus}
         />
       ) : (
@@ -122,6 +130,21 @@ export function DetailPane({
       )}
     </div>
   );
+}
+
+/**
+ * A shared playlist, in the shape the panel renders.
+ *
+ * It only ever reached us because its owner made it public, so `isPublic` is
+ * true by construction. Nothing here can change that flag: the page is read-only.
+ */
+function asPlaylist(shared: SharedPlaylist): Playlist {
+  return {
+    id: shared.id,
+    name: shared.name,
+    tracks: shared.tracks.map((track) => ({ uri: track.uri, trackId: track.trackId })),
+    isPublic: true,
+  };
 }
 
 function countOf(queue: QueueSource): number {

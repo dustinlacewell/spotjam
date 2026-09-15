@@ -1,4 +1,4 @@
-import { NULL_POINTER, type QueueItem } from "@spotjam/protocol";
+import { NULL_POINTER, type QueueItem, type SharedPlaylist } from "@spotjam/protocol";
 import { describe, expect, it } from "vitest";
 
 import * as Room from "./room-state.ts";
@@ -424,6 +424,107 @@ describe("progress", () => {
   });
 });
 
+describe("public playlists", () => {
+  const mix: SharedPlaylist = {
+    id: "p1",
+    name: "Morning",
+    tracks: [{ uri: "spotify:track:a1", trackId: "a1" }],
+  };
+
+  it("reads back what a member set", () => {
+    const state = Room.setPublicPlaylists(roomWith([ALICE, "alice"]), ALICE, [mix]);
+    expect(Room.publicPlaylistsOf(state, ALICE)).toEqual([mix]);
+  });
+
+  it("starts a joiner with none", () => {
+    expect(Room.publicPlaylistsOf(roomWith([ALICE, "alice"]), ALICE)).toEqual([]);
+  });
+
+  it("copies the array rather than aliasing the caller's", () => {
+    const given: SharedPlaylist[] = [mix];
+    const state = Room.setPublicPlaylists(roomWith([ALICE, "alice"]), ALICE, given);
+    given.length = 0;
+
+    expect(Room.publicPlaylistsOf(state, ALICE)).toEqual([mix]);
+  });
+
+  it("scopes a set to its own member", () => {
+    const state = Room.setPublicPlaylists(
+      roomWith([ALICE, "alice"], [BOB, "bob"]),
+      ALICE,
+      [mix],
+    );
+    expect(Room.publicPlaylistsOf(state, BOB)).toEqual([]);
+  });
+
+  it("ignores a set from an unknown member", () => {
+    const state = roomWith([ALICE, "alice"]);
+    expect(Room.setPublicPlaylists(state, CAROL, [mix])).toBe(state);
+  });
+
+  it("offers nothing for an unknown member rather than throwing", () => {
+    expect(Room.publicPlaylistsOf(roomWith([ALICE, "alice"]), CAROL)).toEqual([]);
+  });
+
+  it("drops a member's playlists when they leave", () => {
+    let state = Room.setPublicPlaylists(roomWith([ALICE, "alice"]), ALICE, [mix]);
+    state = Room.leave(state, ALICE);
+
+    expect(Room.publicPlaylistsOf(state, ALICE)).toEqual([]);
+  });
+
+  /** The revision a snapshot reports for one member. */
+  function revisionOf(state: RoomState, pubkey: string): number | undefined {
+    return Room.projectSnapshot(state, ALICE, NOW).participants.find(
+      (p) => p.pubkey === pubkey,
+    )?.playlistsRevision;
+  }
+
+  it("starts a joiner's revision at 0", () => {
+    expect(revisionOf(roomWith([ALICE, "alice"]), ALICE)).toBe(0);
+  });
+
+  it("bumps the revision on every set, even an identical one", () => {
+    let state = Room.setPublicPlaylists(roomWith([ALICE, "alice"]), ALICE, [mix]);
+    expect(revisionOf(state, ALICE)).toBe(1);
+
+    state = Room.setPublicPlaylists(state, ALICE, [mix]);
+    expect(revisionOf(state, ALICE)).toBe(2);
+  });
+
+  it("leaves other members' revisions alone", () => {
+    const state = Room.setPublicPlaylists(
+      roomWith([ALICE, "alice"], [BOB, "bob"]),
+      ALICE,
+      [mix],
+    );
+    expect(revisionOf(state, BOB)).toBe(0);
+  });
+
+  it("resets the revision when a member rejoins", () => {
+    let state = Room.setPublicPlaylists(roomWith([ALICE, "alice"]), ALICE, [mix]);
+    state = Room.leave(state, ALICE);
+    state = Room.join(state, ALICE, "alice");
+
+    expect(revisionOf(state, ALICE)).toBe(0);
+  });
+
+  it("keeps playlists out of the snapshot", () => {
+    const state = Room.setPublicPlaylists(roomWith([ALICE, "alice"]), ALICE, [mix]);
+    const snapshot = Room.projectSnapshot(state, ALICE, NOW);
+
+    expect(Object.keys(snapshot).sort()).toEqual([
+      "myQueue",
+      "participants",
+      "pointer",
+      "progress",
+      "roomId",
+      "serverTime",
+      "sessionQueue",
+    ]);
+  });
+});
+
 describe("projectSnapshot", () => {
   it("gives each recipient their own queue", () => {
     let state = roomWith([ALICE, "alice"], [BOB, "bob"]);
@@ -471,9 +572,9 @@ describe("projectSnapshot", () => {
     state = Room.setBroadcasting(state, BOB, true);
 
     expect(Room.projectSnapshot(state, ALICE, NOW).participants).toEqual([
-      { pubkey: ALICE, username: "alice", broadcasting: false },
-      { pubkey: BOB, username: "bob", broadcasting: true },
-      { pubkey: CAROL, username: "carol", broadcasting: false },
+      { pubkey: ALICE, username: "alice", broadcasting: false, playlistsRevision: 0 },
+      { pubkey: BOB, username: "bob", broadcasting: true, playlistsRevision: 0 },
+      { pubkey: CAROL, username: "carol", broadcasting: false, playlistsRevision: 0 },
     ]);
   });
 

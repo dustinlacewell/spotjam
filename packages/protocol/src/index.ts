@@ -53,6 +53,10 @@ export {
   type SeekOp,
   type SkipOp,
   type ReportProgressOp,
+  type PlaylistTrack,
+  type SharedPlaylist,
+  type SetPublicPlaylistsOp,
+  type ViewPlaylistsOp,
 } from "./ops.js";
 
 export {
@@ -68,6 +72,7 @@ export {
   type RoomListEvent,
   type RoomDetailEvent,
   type ErrorEvent,
+  type PlaylistsEvent,
   type ServerEvent,
   type ServerEventType,
 } from "./events.js";

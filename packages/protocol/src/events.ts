@@ -5,7 +5,7 @@
 // no sequence numbers, no resync on reconnect, no divergence. A room holds
 // tens of tracks and a handful of people, so the trade is easy.
 
-import type { QueueItem } from "./ops.js";
+import type { QueueItem, SharedPlaylist } from "./ops.js";
 import type { PublicKeyHex } from "./identity.js";
 
 /** Someone in a room, as everyone else sees them. */
@@ -13,6 +13,14 @@ export interface Participant {
   pubkey: PublicKeyHex;
   username: string;
   broadcasting: boolean;
+  /**
+   * Bumps on every `set-public-playlists`; 0 on join.
+   *
+   * Public playlists stay out of the snapshot, so a viewer holding a copy has
+   * no way to learn it went stale. This counter is the one thing about them the
+   * snapshot does carry: when it moves, viewers re-fetch.
+   */
+  playlistsRevision: number;
 }
 
 /** One queued track plus who queued it. */
@@ -130,11 +138,20 @@ export interface ErrorEvent {
   message: string;
 }
 
+/** One member's public playlists, sent to whoever asked. */
+export interface PlaylistsEvent {
+  type: "playlists";
+  roomId: string;
+  ownerPubkey: PublicKeyHex;
+  playlists: SharedPlaylist[];
+}
+
 export type ServerEvent =
   | RoomStateEvent
   | RegisteredEvent
   | RoomListEvent
   | RoomDetailEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | PlaylistsEvent;
 
 export type ServerEventType = ServerEvent["type"];

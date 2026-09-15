@@ -11,6 +11,7 @@ import type {
   PublicKeyHex,
   QueueItem,
   SessionEntry,
+  SharedPlaylist,
 } from "@spotjam/protocol";
 
 import type { ConnectionStatus, RoomError } from "../lib/room-client";
@@ -51,6 +52,17 @@ export interface Room {
   sendToTopOfMyQueue(itemId: string): void;
   shuffleMyQueue(): void;
   clearMyQueue(): void;
+
+  // --- shared playlists --------------------------------------------------
+  //
+  // The room holds a copy of your public playlists only while you are in it,
+  // and hands one member's set to whoever asks. `playlistsOf` reads the last
+  // answer; ask for a fresh one with `viewPlaylists`.
+
+  /** Replace the whole public set. Never a patch. */
+  setPublicPlaylists(playlists: SharedPlaylist[]): void;
+  viewPlaylists(ownerPubkey: PublicKeyHex): void;
+  playlistsOf(ownerPubkey: PublicKeyHex): SharedPlaylist[];
 
   // --- playback --------------------------------------------------------
 

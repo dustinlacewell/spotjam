@@ -13,7 +13,7 @@ export function loadPlaylists(): Playlist[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isPlaylist);
+    return parsed.filter(isPlaylist).map(withPublicFlag);
   } catch {
     return [];
   }
@@ -34,4 +34,12 @@ function isPlaylist(value: unknown): value is Playlist {
     typeof list.name === "string" &&
     Array.isArray(list.tracks)
   );
+}
+
+/**
+ * Playlists stored before sharing existed carry no flag. They load private:
+ * nothing goes to the room until its owner says so.
+ */
+function withPublicFlag(list: Playlist): Playlist {
+  return list.isPublic === true ? list : { ...list, isPublic: false };
 }

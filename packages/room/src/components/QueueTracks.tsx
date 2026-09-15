@@ -1,5 +1,6 @@
-import { HintLine, Pill } from "@spotjam/ui";
-import type { QueueItem, SessionEntry } from "@spotjam/protocol";
+import { useState } from "react";
+import { HintLine, Pill, TextField } from "@spotjam/ui";
+import type { QueueItem, SessionEntry, SharedPlaylist } from "@spotjam/protocol";
 import type { ParsedLinks } from "../lib/spotify-link";
 import { parseSpotifyLinks } from "../lib/spotify-link";
 import { AddTrackBar } from "./AddTrackBar";
@@ -13,7 +14,13 @@ import styles from "./PlaylistsPanel.module.css";
 export type QueueSource =
   | { kind: "session"; entries: SessionEntry[] }
   | { kind: "mine"; items: QueueItem[]; isBroadcasting: boolean }
-  | { kind: "other"; items: QueueItem[]; ownerName: string };
+  | {
+      kind: "other";
+      items: QueueItem[];
+      ownerName: string;
+      /** Whichever of their playlists they made public. */
+      playlists: SharedPlaylist[];
+    };
 
 export function QueueTracks({
   source,
@@ -38,11 +45,19 @@ export function QueueTracks({
 }) {
   const editable = source.kind !== "other";
   const count = source.kind === "session" ? source.entries.length : source.items.length;
+  const [query, setQuery] = useState("");
 
   return (
     <div className={styles.tracksColumn}>
       {source.kind === "mine" && count > 0 && (
         <div className={styles.tracksHeader}>
+          <TextField
+            value={query}
+            onChange={setQuery}
+            placeholder="Search your queue"
+            size="sm"
+            spellCheck={false}
+          />
           <div className={styles.tracksActions}>
             <Pill disabled={count < 2} onClick={onShuffle}>
               Shuffle
@@ -56,10 +71,14 @@ export function QueueTracks({
 
       {editable ? (
         <TrackDropZone onLinks={onLinks}>
-          <div className={styles.tracksScroll}>{listOf(source, { onMove, onSendToTop, onRemove })}</div>
+          <div className={styles.tracksScroll}>
+            {listOf(source, { query, onMove, onSendToTop, onRemove })}
+          </div>
         </TrackDropZone>
       ) : (
-        <div className={styles.tracksScroll}>{listOf(source, { onMove, onSendToTop, onRemove })}</div>
+        <div className={styles.tracksScroll}>
+          {listOf(source, { query, onMove, onSendToTop, onRemove })}
+        </div>
       )}
 
       {source.kind === "mine" && count > 0 && !source.isBroadcasting && (
@@ -90,6 +109,7 @@ export function QueueTracks({
 function listOf(
   source: QueueSource,
   handlers: {
+    query: string;
     onMove: (fromIndex: number, toIndex: number) => void;
     onSendToTop: (itemId: string) => void;
     onRemove: (itemId: string) => void;
@@ -102,6 +122,7 @@ function listOf(
   return (
     <MyQueueList
       items={source.items}
+      query={handlers.query}
       onMove={handlers.onMove}
       onSendToTop={handlers.onSendToTop}
       onRemove={handlers.onRemove}

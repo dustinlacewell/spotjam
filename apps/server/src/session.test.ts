@@ -1,4 +1,9 @@
-import { generateKeypair, seal, type ServerEvent } from "@spotjam/protocol";
+import {
+  generateKeypair,
+  seal,
+  type ServerEvent,
+  type SharedPlaylist,
+} from "@spotjam/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { newConnection, type Connection } from "./connections.ts";
@@ -256,6 +261,112 @@ describe("rooms", () => {
 
     send(connection, { type: "clear-queue", roomId: "jam" }, bob);
     expect(lastEvent(socket)).toMatchObject({ type: "error", code: "unknown-identity" });
+  });
+});
+
+describe("public playlists", () => {
+  const mix: SharedPlaylist = {
+    id: "p1",
+    name: "Morning",
+    tracks: [{ uri: "spotify:track:a1", trackId: "a1" }],
+  };
+
+  function authed(identity = alice, username = "alice") {
+    const { socket, connection } = connect();
+    send(connection, { type: "register", username }, identity);
+    socket.clear();
+    return { socket, connection };
+  }
+
+  /** Alice sharing one playlist, with Bob in the room beside her. */
+  function sharedRoom() {
+    const a = authed(alice, "alice");
+    const b = authed(bob, "bob");
+    send(a.connection, { type: "join-room", roomId: "jam" });
+    send(b.connection, { type: "join-room", roomId: "jam" }, bob);
+    send(a.connection, { type: "set-public-playlists", roomId: "jam", playlists: [mix] });
+    a.socket.clear();
+    b.socket.clear();
+    return { a, b };
+  }
+
+  it("answers a viewer with the owner's playlists", () => {
+    const { b } = sharedRoom();
+    send(b.connection, {
+      type: "view-playlists",
+      roomId: "jam",
+      ownerPubkey: alice.publicKey,
+    }, bob);
+
+    expect(b.socket.events()).toEqual([
+      {
+        type: "playlists",
+        roomId: "jam",
+        ownerPubkey: alice.publicKey,
+        playlists: [mix],
+      },
+    ]);
+  });
+
+  it("tells nobody but the asker", () => {
+    const { a, b } = sharedRoom();
+    send(b.connection, {
+      type: "view-playlists",
+      roomId: "jam",
+      ownerPubkey: alice.publicKey,
+    }, bob);
+
+    // A read moves nothing, so the owner hears neither the answer nor a snapshot.
+    expect(a.socket.sent).toHaveLength(0);
+  });
+
+  it("publishes no snapshot for a read", () => {
+    const { b } = sharedRoom();
+    send(b.connection, {
+      type: "view-playlists",
+      roomId: "jam",
+      ownerPubkey: alice.publicKey,
+    }, bob);
+
+    expect(b.socket.events<ServerEvent>().map((event) => event.type)).toEqual(["playlists"]);
+  });
+
+  it("answers an owner nobody knows with an empty list", () => {
+    const { b } = sharedRoom();
+    send(b.connection, {
+      type: "view-playlists",
+      roomId: "jam",
+      ownerPubkey: "c".repeat(64),
+    }, bob);
+
+    expect(lastEvent(b.socket)).toMatchObject({ type: "playlists", playlists: [] });
+  });
+
+  it("rejects a view with no owner key", () => {
+    const { b } = sharedRoom();
+    send(b.connection, { type: "view-playlists", roomId: "jam", ownerPubkey: "" }, bob);
+
+    expect(lastEvent(b.socket)).toMatchObject({ type: "error", code: "malformed" });
+  });
+
+  it("rejects malformed playlists", () => {
+    const { a } = sharedRoom();
+    send(a.connection, { type: "set-public-playlists", roomId: "jam", playlists: "nope" });
+
+    expect(lastEvent(a.socket)).toMatchObject({ type: "error", code: "malformed" });
+  });
+
+  it("replaces the whole set rather than appending", () => {
+    const { a, b } = sharedRoom();
+    const evening: SharedPlaylist = { id: "p2", name: "Evening", tracks: [] };
+    send(a.connection, { type: "set-public-playlists", roomId: "jam", playlists: [evening] });
+    send(b.connection, {
+      type: "view-playlists",
+      roomId: "jam",
+      ownerPubkey: alice.publicKey,
+    }, bob);
+
+    expect(lastEvent(b.socket)).toMatchObject({ playlists: [evening] });
   });
 });
 

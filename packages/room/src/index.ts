@@ -26,6 +26,7 @@ export {
   ops,
   parseServerEvent,
   participantsOf,
+  peerPlaylistsOf,
   pointerOf,
   progressOf,
   queueOf,
@@ -67,7 +68,9 @@ export {
   deletePlaylist,
   removeTrackFromPlaylist,
   renamePlaylist,
+  setPlaylistPublic,
   shufflePlaylist,
+  toSharedPlaylists,
 } from "./lib/playlists";
 export type { Playlist } from "./lib/playlists";
 
