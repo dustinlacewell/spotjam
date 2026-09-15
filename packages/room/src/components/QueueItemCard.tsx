@@ -13,6 +13,7 @@ export function QueueItemCard({
   isDragging,
   isSelected,
   onClick,
+  onContextMenu,
   onDragStart,
   onDragOver,
   onDrop,
@@ -30,6 +31,7 @@ export function QueueItemCard({
   /** Part of the current multi-select, so a drag carries it along with the rest. */
   isSelected?: boolean;
   onClick?: (e: React.MouseEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   onDragStart?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
@@ -49,6 +51,7 @@ export function QueueItemCard({
       className={cardClass({ isPlaying, isDragging, draggable })}
       draggable={draggable}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}

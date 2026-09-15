@@ -45,6 +45,15 @@ export function createPlaylistWithTracks(
   return [...created.slice(0, -1), { ...fresh, tracks: [...appendUniqueTracks([], tracks)] }];
 }
 
+/** The name a new playlist gets: "Untitled", then "Untitled 2", "Untitled 3", ... */
+export function defaultPlaylistName(existing: string[]): string {
+  if (!existing.includes("Untitled")) return "Untitled";
+  for (let n = 2; ; n += 1) {
+    const candidate = `Untitled ${n}`;
+    if (!existing.includes(candidate)) return candidate;
+  }
+}
+
 export function deletePlaylist(lists: Playlist[], id: string): Playlist[] {
   return lists.filter((list) => list.id !== id);
 }

@@ -6,10 +6,14 @@ import type { ParsedLinks, ParsedTrack } from "../lib/spotify-link";
 import type { Playlist } from "../lib/playlists";
 import { parseSpotifyLinks } from "../lib/spotify-link";
 import { carriesTracks, linksFromDrop } from "../lib/drop-links";
+import { tracksOf } from "../lib/selection";
 import { matchesTrack } from "../lib/track-search";
 import { AddTrackBar } from "./AddTrackBar";
 import { PublicToggle } from "./PublicToggle";
 import { QueueItemCard } from "./QueueItemCard";
+import { TrackContextMenu } from "./TrackContextMenu";
+import { useMultiSelect } from "./use-multi-select";
+import { useTrackContextMenu } from "./use-track-context-menu";
 import { useTrackMetadataMap } from "./use-track-metadata";
 import styles from "./PlaylistsPanel.module.css";
 import listStyles from "./QueueLists.module.css";
@@ -55,6 +59,9 @@ export function PlaylistTracks({
   const dragDepth = useRef(0);
   const isEmpty = playlist.tracks.length === 0;
   const metadataByUri = useTrackMetadataMap(playlist.tracks.map((t) => t.uri));
+  const rows = playlist.tracks.map(cardItem);
+  const select = useMultiSelect(rows.map((row) => row.id));
+  const menu = useTrackContextMenu();
   const filtering = query.trim() !== "";
   const visibleTracks = playlist.tracks
     .map((track, index) => ({ track, index }))
@@ -85,12 +92,17 @@ export function PlaylistTracks({
   ) : (
     <ul className={styles.trackList}>
       {!filtering && <DropIndicator active={overGap === 0} />}
-      {visibleTracks.map(({ track, index }, position) => (
-        <Fragment key={`${track.trackId}-${index}`}>
+      {visibleTracks.map(({ index }, position) => {
+        const row = rows[index]!;
+        return (
+        <Fragment key={row.id}>
           <QueueItemCard
-            item={cardItem(track, index)}
+            item={row}
             isPlaying={false}
             ownerLabel=""
+            isSelected={select.isSelected(row.id)}
+            onClick={(e) => select.onRowClick(e, row.id)}
+            onContextMenu={(e) => menu.open(e, tracksOf(rows, select.contextTargets(row.id)))}
             onRemove={readOnly ? undefined : () => onRemoveTrack(index)}
             onDragOver={
               readOnly || filtering
@@ -99,15 +111,16 @@ export function PlaylistTracks({
                     if (!carriesTracks(e.dataTransfer)) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "copy";
-                    const row = e.currentTarget.getBoundingClientRect();
-                    const isTopHalf = e.clientY < row.top + row.height / 2;
+                    const bounds = e.currentTarget.getBoundingClientRect();
+                    const isTopHalf = e.clientY < bounds.top + bounds.height / 2;
                     setOverGap(isTopHalf ? position : position + 1);
                   }
             }
           />
           {!filtering && <DropIndicator active={overGap === position + 1} />}
         </Fragment>
-      ))}
+        );
+      })}
     </ul>
   );
 
@@ -207,14 +220,16 @@ export function PlaylistTracks({
           }}
         />
       )}
+
+      <TrackContextMenu at={menu.at} tracks={menu.tracks} onClose={menu.close} />
     </div>
   );
 }
 
 /** QueueItemCard renders QueueItems; a playlist track has no queue identity. */
-function cardItem(track: ParsedTrack, index: number): QueueItem {
+function cardItem(track: ParsedTrack): QueueItem {
   return {
-    id: `${track.trackId}-${index}`,
+    id: track.trackId,
     uri: track.uri,
     trackId: track.trackId,
   };

@@ -17,6 +17,7 @@ import { displayedProgress } from "../lib/progress";
 import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import { useRoomServices } from "../services";
 import { usePlaylists } from "./use-playlists";
+import { PlaylistsProvider } from "./playlists-context";
 import { NowPlaying } from "./NowPlaying";
 import { BroadcastToggle } from "./BroadcastToggle";
 import { DetailPane } from "./DetailPane";
@@ -125,6 +126,7 @@ export function QueueView({
   }
 
   return (
+    <PlaylistsProvider api={playlistsApi}>
     <div className={styles.page}>
       <header className={styles.header}>
         <Mark size="sm">
@@ -210,6 +212,7 @@ export function QueueView({
         </main>
       </div>
     </div>
+    </PlaylistsProvider>
   );
 }
 

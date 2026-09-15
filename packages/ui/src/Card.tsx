@@ -43,6 +43,7 @@ export interface CardProps {
   selected?: boolean;
   className?: string;
   onClick?: MouseEventHandler<HTMLElement>;
+  onContextMenu?: MouseEventHandler<HTMLElement>;
   draggable?: boolean;
   onDragStart?: DragEventHandler<HTMLElement>;
   onDragOver?: DragEventHandler<HTMLElement>;
@@ -59,6 +60,7 @@ export function Card({
   selected = false,
   className,
   onClick,
+  onContextMenu,
   draggable,
   onDragStart,
   onDragOver,
@@ -69,6 +71,7 @@ export function Card({
     <Tag
       className={classes(tone, padding, interactive, selected, className)}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragOver={onDragOver}

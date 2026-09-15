@@ -1,0 +1,21 @@
+.filter {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.filter::placeholder {
+  color: var(--text-faint);
+}
+
+.filter:focus-visible {
+  outline: none;
+  border-bottom-color: var(--text-dim);
+}

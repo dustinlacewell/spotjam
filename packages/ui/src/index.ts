@@ -38,3 +38,8 @@ export type { MarkSize } from "./Mark";
 export { CenteredCardPage } from "./CenteredCardPage";
 
 export { EngravedText } from "./EngravedText";
+
+export { ContextMenu, ContextMenuItem } from "./ContextMenu";
+export type { ContextMenuProps, ContextMenuItemProps } from "./ContextMenu";
+
+export type { Point } from "./context-menu-layout";

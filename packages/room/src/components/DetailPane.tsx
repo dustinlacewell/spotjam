@@ -3,6 +3,7 @@ import type { SharedPlaylist } from "@spotjam/protocol";
 import type { Playlist } from "../lib/playlists";
 import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import type { PlaylistsApi } from "./use-playlists";
+import { defaultPlaylistName } from "../lib/playlists";
 import { PlaylistList } from "./PlaylistList";
 import { PlaylistTracks } from "./PlaylistTracks";
 import { QueueTracks, type QueueSource } from "./QueueTracks";
@@ -77,7 +78,7 @@ export function DetailPane({
   }, [pendingName, playlists, onSelect]);
 
   function handleCreate() {
-    const name = defaultName(playlists.map((p) => p.name));
+    const name = defaultPlaylistName(playlists.map((p) => p.name));
     create(name);
     setRenamingId(null);
     setPendingName(name);
@@ -155,13 +156,4 @@ function asPlaylist(shared: SharedPlaylist): Playlist {
 
 function countOf(queue: QueueSource): number {
   return queue.kind === "session" ? queue.entries.length : queue.items.length;
-}
-
-/** "Untitled", then "Untitled 2", "Untitled 3", ... */
-function defaultName(existing: string[]): string {
-  if (!existing.includes("Untitled")) return "Untitled";
-  for (let n = 2; ; n += 1) {
-    const candidate = `Untitled ${n}`;
-    if (!existing.includes(candidate)) return candidate;
-  }
 }

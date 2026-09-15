@@ -1,8 +1,12 @@
 import { Fragment, useState } from "react";
 import { moveMany, type QueueItem } from "@spotjam/protocol";
 import { INTERNAL_DRAG_MIME } from "../lib/drop-links";
+import { tracksOf } from "../lib/selection";
 import { matchesTrack } from "../lib/track-search";
 import { QueueItemCard } from "./QueueItemCard";
+import { TrackContextMenu } from "./TrackContextMenu";
+import { useMultiSelect } from "./use-multi-select";
+import { useTrackContextMenu } from "./use-track-context-menu";
 import { useTrackMetadataMap } from "./use-track-metadata";
 import styles from "./QueueLists.module.css";
 
@@ -21,12 +25,8 @@ export function MyQueueList({
   onSendToTop: (itemId: string) => void;
   onRemove: (itemId: string) => void;
 }) {
-  // Shift-click extends a range from this row; ctrl/cmd-click toggles this
-  // row in or out of the selection, leaving the rest as-is (so a drag can
-  // carry a non-contiguous set); plain click replaces the selection with
-  // just the clicked row (or clears it, clicking the only selected row).
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-  const [anchorId, setAnchorId] = useState<string | null>(null);
+  const select = useMultiSelect(items.map((item) => item.id));
+  const menu = useTrackContextMenu();
   const [draggedIds, setDraggedIds] = useState<ReadonlySet<string> | null>(null);
   // Position between rows (0..visibleItems.length), not a row itself — so
   // the last gap (drop at the end) is a real, distinct target.
@@ -46,28 +46,8 @@ export function MyQueueList({
     return <p className={styles.empty}>No tracks match "{query}".</p>;
   }
 
-  function handleRowClick(itemId: string, index: number, e: React.MouseEvent) {
-    if (e.shiftKey && anchorId !== null) {
-      const anchorIndex = items.findIndex((item) => item.id === anchorId);
-      const [start, end] = anchorIndex < index ? [anchorIndex, index] : [index, anchorIndex];
-      setSelectedIds(new Set(items.slice(start, end + 1).map((item) => item.id)));
-      return;
-    }
-    if (e.ctrlKey || e.metaKey) {
-      setAnchorId(itemId);
-      setSelectedIds((current) => {
-        const next = new Set(current);
-        if (next.has(itemId)) next.delete(itemId);
-        else next.add(itemId);
-        return next;
-      });
-      return;
-    }
-    setAnchorId(itemId);
-    setSelectedIds((current) => (current.size === 1 && current.has(itemId) ? new Set() : new Set([itemId])));
-  }
-
   function handleDragStart(item: QueueItem, e: React.DragEvent) {
+    const selectedIds = select.selection.ids;
     const dragging = selectedIds.has(item.id) ? selectedIds : new Set([item.id]);
     setDraggedIds(dragging);
     e.dataTransfer.effectAllowed = "move";
@@ -116,40 +96,44 @@ export function MyQueueList({
   }
 
   return (
-    <ul className={styles.list}>
-      <DropIndicator active={overGap === 0} />
-      {visibleItems.map(({ item, index }, position) => (
-        <Fragment key={item.id}>
-          <QueueItemCard
-            item={item}
-            isPlaying={false}
-            // Your own queue: every track is yours, so no name chip.
-            ownerLabel=""
-            draggable={!filtering}
-            isDragging={draggedIds?.has(item.id) ?? false}
-            isSelected={selectedIds.has(item.id)}
-            onClick={(e) => handleRowClick(item.id, index, e)}
-            onDragStart={(e) => handleDragStart(item, e)}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-              const row = e.currentTarget.getBoundingClientRect();
-              const isTopHalf = e.clientY < row.top + row.height / 2;
-              const gap = isTopHalf ? position : position + 1;
-              setOverGap(isNoopGap(gap) ? null : gap);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleDrop();
-            }}
-            onDragEnd={handleDragEnd}
-            onSendToTop={index === 0 ? undefined : () => onSendToTop(item.id)}
-            onRemove={() => onRemove(item.id)}
-          />
-          <DropIndicator active={overGap === position + 1} />
-        </Fragment>
-      ))}
-    </ul>
+    <>
+      <ul className={styles.list}>
+        <DropIndicator active={overGap === 0} />
+        {visibleItems.map(({ item, index }, position) => (
+          <Fragment key={item.id}>
+            <QueueItemCard
+              item={item}
+              isPlaying={false}
+              // Your own queue: every track is yours, so no name chip.
+              ownerLabel=""
+              draggable={!filtering}
+              isDragging={draggedIds?.has(item.id) ?? false}
+              isSelected={select.isSelected(item.id)}
+              onClick={(e) => select.onRowClick(e, item.id)}
+              onContextMenu={(e) => menu.open(e, tracksOf(items, select.contextTargets(item.id)))}
+              onDragStart={(e) => handleDragStart(item, e)}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const row = e.currentTarget.getBoundingClientRect();
+                const isTopHalf = e.clientY < row.top + row.height / 2;
+                const gap = isTopHalf ? position : position + 1;
+                setOverGap(isNoopGap(gap) ? null : gap);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                handleDrop();
+              }}
+              onDragEnd={handleDragEnd}
+              onSendToTop={index === 0 ? undefined : () => onSendToTop(item.id)}
+              onRemove={() => onRemove(item.id)}
+            />
+            <DropIndicator active={overGap === position + 1} />
+          </Fragment>
+        ))}
+      </ul>
+      <TrackContextMenu at={menu.at} tracks={menu.tracks} onClose={menu.close} />
+    </>
   );
 }
 
