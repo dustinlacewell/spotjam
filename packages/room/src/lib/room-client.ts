@@ -110,11 +110,11 @@ export const ops = {
   }),
   enqueue: (roomId: string, items: QueueItem[]): Op => ({ type: "enqueue", roomId, items }),
   remove: (roomId: string, itemId: string): Op => ({ type: "remove", roomId, itemId }),
-  move: (roomId: string, fromIndex: number, toIndex: number): Op => ({
-    type: "move",
+  moveMany: (roomId: string, itemIds: string[], beforeItemId: string | null): Op => ({
+    type: "move-many",
     roomId,
-    fromIndex,
-    toIndex,
+    itemIds,
+    beforeItemId,
   }),
   sendToTop: (roomId: string, itemId: string): Op => ({ type: "send-to-top", roomId, itemId }),
   shuffle: (roomId: string): Op => ({ type: "shuffle", roomId }),
@@ -338,11 +338,17 @@ export function progressOf(view: RoomView): Progress | null {
 /**
  * One participant's queue.
  *
- * A snapshot carries only the recipient's own queue, so another person's is
- * unknowable and reads as empty. The session queue is where their tracks show.
+ * My own queue comes from the snapshot's `myQueue`, which holds my tracks even
+ * when I am not broadcasting. A peer's queue is read off the session queue: the
+ * server interleaves members round-robin, so filtering by owner recovers that
+ * member's own order. A member who is not broadcasting therefore reads as empty
+ * -- the server sends nobody's private queue.
  */
 export function queueOf(view: RoomView, pubkey: PublicKeyHex, me: PublicKeyHex): QueueItem[] {
-  return pubkey === me ? myQueueOf(view) : [];
+  if (pubkey === me) return myQueueOf(view);
+  return sessionQueueOf(view)
+    .filter((entry) => entry.ownerPubkey === pubkey)
+    .map((entry) => entry.item);
 }
 
 /**

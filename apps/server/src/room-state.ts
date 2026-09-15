@@ -8,6 +8,7 @@
 import {
   NULL_POINTER,
   appendUniqueTracks,
+  moveMany as moveManyItems,
   type Participant,
   type PlaybackPointer,
   type Progress,
@@ -151,23 +152,14 @@ export function remove(
   return mapQueue(state, pubkey, (queue) => queue.filter((item) => item.id !== itemId));
 }
 
-/** Reorder within one queue. Out-of-range indices leave the queue untouched. */
-export function move(
+/** Reorder a block of items within one queue. See `moveMany` in @spotjam/protocol. */
+export function moveMany(
   state: RoomState,
   pubkey: PublicKeyHex,
-  fromIndex: number,
-  toIndex: number,
+  itemIds: readonly string[],
+  beforeItemId: string | null,
 ): RoomState {
-  return mapQueue(state, pubkey, (queue) => {
-    if (!isIndexInRange(fromIndex, queue.length) || !isIndexInRange(toIndex, queue.length)) {
-      return queue;
-    }
-    const next = [...queue];
-    const [moved] = next.splice(fromIndex, 1);
-    if (moved === undefined) return queue;
-    next.splice(toIndex, 0, moved);
-    return next;
-  });
+  return mapQueue(state, pubkey, (queue) => moveManyItems(queue, itemIds, beforeItemId));
 }
 
 export function sendToTop(
@@ -479,10 +471,6 @@ function mapQueue(
   const member = state.members.get(pubkey);
   if (member === undefined) return state;
   return settlePointer(withMember(state, { ...member, queue: [...transform(member.queue)] }));
-}
-
-function isIndexInRange(index: number, length: number): boolean {
-  return Number.isInteger(index) && index >= 0 && index < length;
 }
 
 /**

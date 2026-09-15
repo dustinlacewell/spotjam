@@ -124,20 +124,20 @@ describe("queue operations", () => {
     expect(ids(state, ALICE)).toEqual(["t2"]);
   });
 
-  it("moves within the queue", () => {
+  it("moves a block of items together, keeping their relative order", () => {
     let state = roomWith([ALICE, "alice"]);
-    state = Room.enqueue(state, ALICE, [track("t1"), track("t2"), track("t3")]);
-    state = Room.move(state, ALICE, 0, 2);
+    state = Room.enqueue(state, ALICE, [track("t1"), track("t2"), track("t3"), track("t4")]);
+    state = Room.moveMany(state, ALICE, ["t4", "t2"], "t1");
 
-    expect(ids(state, ALICE)).toEqual(["t2", "t3", "t1"]);
+    expect(ids(state, ALICE)).toEqual(["t2", "t4", "t1", "t3"]);
   });
 
-  it("ignores an out-of-range move", () => {
+  it("moves a block to the end when beforeItemId is null", () => {
     let state = roomWith([ALICE, "alice"]);
-    state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
+    state = Room.enqueue(state, ALICE, [track("t1"), track("t2"), track("t3")]);
+    state = Room.moveMany(state, ALICE, ["t1"], null);
 
-    expect(ids(Room.move(state, ALICE, 0, 9), ALICE)).toEqual(["t1", "t2"]);
-    expect(ids(Room.move(state, ALICE, -1, 1), ALICE)).toEqual(["t1", "t2"]);
+    expect(ids(state, ALICE)).toEqual(["t2", "t3", "t1"]);
   });
 
   it("sends an item to the top", () => {

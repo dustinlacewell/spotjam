@@ -348,7 +348,7 @@ describe("RoomClient ops", () => {
 
     room.appendToMyQueue([{ id: "i1", uri: "spotify:track:x", trackId: "x" }]);
     room.removeFromMyQueue("i1");
-    room.moveInMyQueue(2, 0);
+    room.moveManyInMyQueue(["i1"], "i2");
     room.sendToTopOfMyQueue("i2");
     room.shuffleMyQueue();
     room.clearMyQueue();
@@ -361,7 +361,7 @@ describe("RoomClient ops", () => {
     expect(latest().types()).toEqual([
       "enqueue",
       "remove",
-      "move",
+      "move-many",
       "send-to-top",
       "shuffle",
       "clear-queue",

@@ -45,7 +45,7 @@ export {
   type SetBroadcastingOp,
   type EnqueueOp,
   type RemoveOp,
-  type MoveOp,
+  type MoveManyOp,
   type SendToTopOp,
   type ShuffleOp,
   type ClearQueueOp,
@@ -77,7 +77,7 @@ export {
   type ServerEventType,
 } from "./events.js";
 
-export { appendUniqueTracks, type HasTrackId } from "./tracks.js";
+export { appendUniqueTracks, moveMany, type HasTrackId, type HasId } from "./tracks.js";
 
 export {
   isQuery,

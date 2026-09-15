@@ -175,7 +175,7 @@ describe("SyncDriver", () => {
       driver.stop();
     });
 
-    it("clears Spotify's queue when the pointer goes null with nothing queued", async () => {
+    it("leaves Spotify's queue alone when the pointer goes null", async () => {
       const room = makeRoom(playingPointer());
       const invoke = makeInvoke(() => null);
       const driver = startDriver(room, invoke);
@@ -187,8 +187,9 @@ describe("SyncDriver", () => {
       room.setPointer(NULL_POINTER);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(invoke.names()).toContain("spotify_pause");
-      expect(invoke.of("spotify_clear_queue")).toHaveLength(1);
+      // An empty room is not ours to drive: no pause, no queue edit.
+      expect(invoke.names()).not.toContain("spotify_pause");
+      expect(invoke.of("spotify_clear_queue")).toHaveLength(0);
       driver.stop();
     });
 
@@ -325,31 +326,33 @@ describe("SyncDriver", () => {
   });
 
   describe("empty pointer", () => {
-    it("pauses Spotify when the pointer goes null after a played item", async () => {
+    it("leaves Spotify playing when the pointer goes null after a played item", async () => {
       const room = makeRoom(playingPointer());
       const invoke = makeInvoke(() => null);
       const driver = startDriver(room, invoke);
       await vi.advanceTimersByTimeAsync(0);
       expect(invoke.names()).toContain("spotify_play_track");
+      invoke.calls.length = 0;
 
       room.setPointer(NULL_POINTER);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(invoke.names()).toContain("spotify_pause");
+      expect(invoke.names()).not.toContain("spotify_pause");
       driver.stop();
     });
 
-    it("pauses on the first apply, so joining a quiet room silences the player", async () => {
+    it("touches nothing on the first apply, so joining a quiet room keeps the user's music", async () => {
       const room = makeRoom(NULL_POINTER);
       const invoke = makeInvoke(() => null);
       const driver = startDriver(room, invoke);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(invoke.names()).toContain("spotify_pause");
+      expect(invoke.names()).not.toContain("spotify_pause");
+      expect(invoke.names()).not.toContain("spotify_play_track");
       driver.stop();
     });
 
-    it("pauses only once while the room stays empty", async () => {
+    it("never pauses while the room stays empty", async () => {
       const room = makeRoom(NULL_POINTER);
       const invoke = makeInvoke(() => null);
       const driver = startDriver(room, invoke);
@@ -358,7 +361,7 @@ describe("SyncDriver", () => {
       room.setQueue([]);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(invoke.of("spotify_pause")).toHaveLength(1);
+      expect(invoke.of("spotify_pause")).toHaveLength(0);
       driver.stop();
     });
   });
@@ -373,13 +376,15 @@ describe("SyncDriver", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(invoke.names()).toEqual([
+        // the control-state read, then the apply's own read
+        "spotify_get_state",
         "spotify_get_state",
         "spotify_play_track",
         "spotify_seek",
         "spotify_pause",
         "spotify_set_next_track",
       ]);
-      expect(invoke.calls[2].args).toEqual({ positionMs: 45_000 });
+      expect(invoke.calls[3].args).toEqual({ positionMs: 45_000 });
       driver.stop();
     });
 
@@ -518,8 +523,10 @@ describe("SyncDriver", () => {
 
       await pollTimes(3);
 
+      // Each poll still reads state to decide control, but nothing is reported
+      // and no command is sent to the player.
       expect(room.setMyProgress).not.toHaveBeenCalled();
-      expect(invoke.names()).not.toContain("spotify_get_state");
+      expect(invoke.names().filter((n) => n !== "spotify_get_state")).toEqual([]);
       driver.stop();
     });
 
@@ -754,28 +761,28 @@ describe("joining a room", () => {
     vi.useRealTimers();
   });
 
-  it("stops the local player when nothing is playing", async () => {
+  it("leaves the local player alone when nothing is playing", async () => {
     const room = makeRoom(NULL_POINTER);
     const invoke = makeInvoke(() => null);
     startDriver(room, invoke);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(invoke.of("spotify_pause")).toHaveLength(1);
+    expect(invoke.of("spotify_pause")).toHaveLength(0);
   });
 
-  it("clears Spotify's queue when nothing is queued", async () => {
+  it("leaves Spotify's queue alone while the room names no track", async () => {
     const room = makeRoom(NULL_POINTER);
     room.setQueue([]);
     const invoke = makeInvoke(() => null);
     startDriver(room, invoke);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(invoke.of("spotify_clear_queue")).not.toHaveLength(0);
+    expect(invoke.of("spotify_clear_queue")).toHaveLength(0);
     expect(invoke.of("spotify_set_next_track")).toHaveLength(0);
   });
 
-  it("sets the next track when the queue is not empty", async () => {
-    const room = makeRoom(NULL_POINTER);
+  it("sets the next track once the room names one", async () => {
+    const room = makeRoom(playingPointer());
     const invoke = makeInvoke(() => null);
     startDriver(room, invoke);
     await vi.advanceTimersByTimeAsync(0);
@@ -793,7 +800,7 @@ describe("joining a room", () => {
   });
 });
 
-describe("silencing the local player on an empty room", () => {
+describe("the user's own music survives a join", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(EPOCH);
@@ -803,7 +810,7 @@ describe("silencing the local player on an empty room", () => {
     vi.useRealTimers();
   });
 
-  function playing(): PlayerState {
+  function ownMusic(): PlayerState {
     return {
       trackUri: "spotify:track:leftover",
       trackName: "leftover",
@@ -813,19 +820,9 @@ describe("silencing the local player on an empty room", () => {
     };
   }
 
-  it("pauses a player that was left playing before the join", async () => {
+  it("leaves a player that was left playing before the join alone", async () => {
     const room = makeRoom(NULL_POINTER);
-    const invoke = makeInvoke(() => playing());
-    const driver = startDriver(room, invoke);
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(invoke.of("spotify_pause")).toHaveLength(1);
-    driver.stop();
-  });
-
-  it("leaves an already-paused player alone", async () => {
-    const room = makeRoom(NULL_POINTER);
-    const invoke = makeInvoke(() => ({ ...playing(), isPaused: true }));
+    const invoke = makeInvoke(() => ownMusic());
     const driver = startDriver(room, invoke);
     await vi.advanceTimersByTimeAsync(0);
 
@@ -833,13 +830,36 @@ describe("silencing the local player on an empty room", () => {
     driver.stop();
   });
 
-  it("pauses when the player state cannot be read", async () => {
-    const room = makeRoom(NULL_POINTER);
-    const invoke = makeInvoke(() => null);
+  it("does not take over a playing room while the user plays their own track", async () => {
+    const room = makeRoom(playingPointer());
+    const invoke = makeInvoke(() => ownMusic());
     const driver = startDriver(room, invoke);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(invoke.of("spotify_pause")).toHaveLength(1);
+    expect(invoke.of("spotify_play_track")).toHaveLength(0);
+    expect(invoke.of("spotify_pause")).toHaveLength(0);
+    driver.stop();
+  });
+
+  it("never skips the room when the user switches to an unrelated track", async () => {
+    const room = makeRoom(playingPointer());
+    const onTrack: PlayerState = {
+      trackUri: URI,
+      trackName: "room track",
+      isPaused: false,
+      positionMs: 10_000,
+      durationMs: 200_000,
+    };
+    let state: PlayerState = onTrack;
+    const invoke = makeInvoke(() => state);
+    const driver = startDriver(room, invoke);
+    await vi.advanceTimersByTimeAsync(0);
+    await pollTimes(1);
+
+    state = ownMusic();
+    await pollTimes(2);
+
+    expect(room.skip).not.toHaveBeenCalled();
     driver.stop();
   });
 });

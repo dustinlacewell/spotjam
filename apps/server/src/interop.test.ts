@@ -691,7 +691,7 @@ describe("interop — forged, replayed and malformed frames", () => {
     // the worst Mallory can do is operate on her own empty queue.
     for (const op of [
       { type: "remove", roomId: "jam", itemId: "a1" },
-      { type: "move", roomId: "jam", fromIndex: 0, toIndex: 2 },
+      { type: "move-many", roomId: "jam", itemIds: ["a1"], beforeItemId: null },
       { type: "send-to-top", roomId: "jam", itemId: "a3" },
       { type: "clear-queue", roomId: "jam" },
     ] satisfies CanonicalValue[]) {

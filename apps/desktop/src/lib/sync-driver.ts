@@ -1,6 +1,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type { PlaybackPointer, Room } from "./room";
 import { positionMs } from "./playback-clock";
+import { nextControlState, type ControlState, type LocalPlayback } from "./control-state";
 
 const POLL_INTERVAL_MS = 2000;
 const TRACK_END_GRACE_MS = 1500;
@@ -61,16 +62,19 @@ function sameClock(a: Clock | null, b: Clock): boolean {
  * `skip` once the track it queued has finished, and the server decides what
  * plays next. Every other client sees the end, stops reporting progress, and
  * waits for the snapshot.
+ *
+ * None of that happens unless this client is actually driving the player. The
+ * user may be listening to their own music instead; `control-state` decides,
+ * and every command and every end detector that reads the player is gated on
+ * `following`. Only the clock-based end timer runs in all states, because it
+ * reads the room, not the player.
  */
 export class SyncDriver {
   private lastAppliedItemId: string | null = null;
-  /**
-   * False until a pointer has been applied even once, which forces the first
-   * apply through applyNewItem. Without it an empty room matches the initial
-   * `lastAppliedItemId` of null and we would never touch the local player —
-   * leaving whatever the user was playing before they joined running.
-   */
-  private hasAppliedPointer = false;
+  /** Do we drive the local player? Null until the first evaluation. */
+  private control: ControlState | null = null;
+  /** The pointer item the control state was last evaluated against. */
+  private lastPointerItemId: string | null = null;
   private lastAppliedPaused: boolean | null = null;
   /** The pointer clock the local player was last placed on, for remote-seek detection. */
   private lastAppliedClock: Clock | null = null;
@@ -123,13 +127,51 @@ export class SyncDriver {
     this.unsubscribeChange = null;
   }
 
+  /**
+   * Re-decides whether we drive the local player, and reports whether we have
+   * just taken it over. Reading Spotify is best-effort: a failed read is a null
+   * `LocalPlayback`, which the decision treats as "no reason to let go".
+   */
+  private async evaluateControl(): Promise<{ took: boolean }> {
+    const pointer = this.room.getPlaybackPointer();
+    const changed = pointer.itemId !== this.lastPointerItemId;
+    this.lastPointerItemId = pointer.itemId;
+
+    const state = await this.tryInvoke<PlayerState>("spotify_get_state");
+    const local: LocalPlayback | null = state
+      ? { trackUri: state.trackUri, isPaused: state.isPaused }
+      : null;
+    const next = this.room.sessionQueue()[0]?.item.uri ?? null;
+
+    const prev = this.control;
+    const control = nextControlState(prev, local, pointer, next, changed);
+    this.control = control;
+    if (control !== prev) {
+      console.debug("spotjam: control", prev ?? "(none)", "->", control);
+    }
+    return { took: control === "following" && prev !== "following" };
+  }
+
+  private get following(): boolean {
+    return this.control === "following";
+  }
+
   /** Brings the local player in line with the shared pointer: track, then position, then pause. */
   private async applyPointer(now = Date.now()): Promise<void> {
+    const { took } = await this.evaluateControl();
     const pointer = this.room.getPlaybackPointer();
 
-    // The first apply always goes the long way, even for an empty pointer: the
-    // local player starts out on whatever the user left it on, not on nothing.
-    if (pointer.itemId !== this.lastAppliedItemId || !this.hasAppliedPointer) {
+    // An empty pointer touches nothing: whatever the user has on keeps playing.
+    // Only our own bookkeeping is cleared, so the next item starts fresh.
+    if (pointer.itemId === null) {
+      this.forgetAppliedItem();
+      return;
+    }
+    if (!this.following) return;
+
+    // Taking the player over is a fresh start on this item, even though the
+    // item itself did not change.
+    if (pointer.itemId !== this.lastAppliedItemId || took) {
       await this.applyNewItem(pointer, now);
       return;
     }
@@ -153,6 +195,8 @@ export class SyncDriver {
    * from inventing a track nobody asked for.
    */
   private async syncNextTrack(): Promise<void> {
+    // The user's own queue is theirs while we are detached.
+    if (!this.following) return;
     const next = this.room.sessionQueue()[0]?.item.uri ?? null;
     if (next === this.lastSetNextUri) return;
     this.lastSetNextUri = next;
@@ -167,35 +211,29 @@ export class SyncDriver {
   }
 
   /**
-   * The pointer names a different item than the one we last applied — including
-   * the empty pointer, and including the first apply after joining.
+   * The pointer names a different item than the one we last applied, or we have
+   * just taken the local player over. Only ever called while following.
    */
   private async applyNewItem(pointer: PlaybackPointer, now: number): Promise<void> {
     this.observedOnTrack = false;
     this.clearEndTimer();
-    this.hasAppliedPointer = true;
     // A new item is a fresh end to report.
     if (pointer.itemId !== this.skippedItemId) this.skippedItemId = null;
 
     if (pointer.itemId === null || !pointer.uri) {
-      await this.applySilence();
+      this.forgetAppliedItem();
     } else {
       await this.applyTrack(pointer, now);
     }
     await this.resyncNextTrack();
   }
 
-  /**
-   * The room names no track, so the local player makes no sound. Whatever it
-   * was playing — a track from before we joined, or one the room has just
-   * finished — is stopped.
-   */
-  private async applySilence(): Promise<void> {
+  /** Drops the bookkeeping for the item we were on, without touching the player. */
+  private forgetAppliedItem(): void {
     this.lastAppliedItemId = null;
     this.lastAppliedPaused = null;
     this.lastAppliedClock = null;
     this.room.setMyProgress(null);
-    await this.stopLocalPlayback();
   }
 
   /** The room names a track: adopt it if Spotify is already there, else start it. */
@@ -209,17 +247,6 @@ export class SyncDriver {
       await this.startTrack(pointer, now);
     }
     this.lastAppliedPaused = pointer.isPaused;
-  }
-
-  /**
-   * Silences the local player, but only if it is actually making sound. Asking
-   * Spotify first keeps this from pausing a player the user had already
-   * paused, and means a failed read leaves us with the safe default: pause.
-   */
-  private async stopLocalPlayback(): Promise<void> {
-    const state = await this.tryInvoke<PlayerState>("spotify_get_state");
-    if (state?.isPaused) return;
-    await this.tryInvoke("spotify_pause");
   }
 
   /**
@@ -271,12 +298,20 @@ export class SyncDriver {
 
   /** The heartbeat: corrects drift and reports where the local player sits. */
   private async poll(now = Date.now()): Promise<void> {
+    const { took } = await this.evaluateControl();
     const pointer = this.room.getPlaybackPointer();
 
     if (pointer.itemId === null) {
       this.room.setMyProgress(null);
       return;
     }
+    // We have just taken the player back: place it on the pointer before the
+    // detectors below read it, or the catch-up read looks like a track end.
+    if (took) {
+      await this.applyNewItem(pointer, now);
+      return;
+    }
+    if (!this.following) return;
     if (pointer.isPaused) return;
 
     const state = await this.tryInvoke<PlayerState>("spotify_get_state");
@@ -402,13 +437,20 @@ export class SyncDriver {
   }
 
   /**
-   * Spotify moved off our track, or parked paused at the very end of it.
-   * Both readings need `observedOnTrack`: before the local player has ever
-   * reached this track, "not on it" means "has not started yet".
+   * Spotify moved into the track we queued behind ours, or parked paused at
+   * the very end of ours. Both readings need `observedOnTrack`: before the
+   * local player has ever reached this track, "not on it" means "has not
+   * started yet".
+   *
+   * Moving to *any other* track is not an end. That is the user picking their
+   * own music, and the control state turns it into a detach, not a skip.
    */
   private looksFinished(state: PlayerState, uri: string | null): boolean {
     if (!this.observedOnTrack) return false;
-    if (state.trackUri !== uri) return true;
+    if (state.trackUri !== uri) {
+      const next = this.room.sessionQueue()[0]?.item.uri ?? null;
+      return next !== null && state.trackUri === next;
+    }
     return (
       state.isPaused &&
       state.durationMs > 0 &&

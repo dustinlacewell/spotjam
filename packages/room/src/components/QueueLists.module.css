@@ -15,3 +15,15 @@
   text-align: center;
   margin-top: var(--space-6);
 }
+
+/* Sits in the flex gap between rows; invisible until a drag hovers its gap. */
+.dropIndicator {
+  height: 2px;
+  margin: -1px 0;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.dropIndicatorActive {
+  background: var(--accent);
+}

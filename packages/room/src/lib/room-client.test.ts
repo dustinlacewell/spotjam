@@ -60,7 +60,12 @@ describe("outgoing payloads", () => {
       broadcasting: true,
     });
     expect(ops.remove(ROOM, "i1")).toEqual({ type: "remove", roomId: ROOM, itemId: "i1" });
-    expect(ops.move(ROOM, 2, 0)).toEqual({ type: "move", roomId: ROOM, fromIndex: 2, toIndex: 0 });
+    expect(ops.moveMany(ROOM, ["i1", "i2"], "i3")).toEqual({
+      type: "move-many",
+      roomId: ROOM,
+      itemIds: ["i1", "i2"],
+      beforeItemId: "i3",
+    });
     expect(ops.sendToTop(ROOM, "i1")).toEqual({
       type: "send-to-top",
       roomId: ROOM,
@@ -210,11 +215,39 @@ describe("reading the view", () => {
     expect(isBroadcasting(view, THEM)).toBe(false);
   });
 
-  it("knows another person's queue is not in the snapshot", () => {
+  it("reads my own queue from the snapshot", () => {
     const mine = [{ id: "i1", uri: "u", trackId: "t" }];
     const view = viewOf(snapshot({ myQueue: mine }));
 
     expect(queueOf(view, ME, ME)).toEqual(mine);
+  });
+
+  it("recovers a peer's queue in order from the interleaved session queue", () => {
+    const b1 = { id: "b1", uri: "ub1", trackId: "b1" };
+    const b2 = { id: "b2", uri: "ub2", trackId: "b2" };
+    const view = viewOf(
+      snapshot({
+        sessionQueue: [
+          { item: { id: "a1", uri: "ua1", trackId: "a1" }, ownerPubkey: ME, ownerName: "alice" },
+          { item: b1, ownerPubkey: THEM, ownerName: "bob" },
+          { item: { id: "a2", uri: "ua2", trackId: "a2" }, ownerPubkey: ME, ownerName: "alice" },
+          { item: b2, ownerPubkey: THEM, ownerName: "bob" },
+        ],
+      }),
+    );
+
+    expect(queueOf(view, THEM, ME)).toEqual([b1, b2]);
+  });
+
+  it("shows a peer with no session entries as empty", () => {
+    const view = viewOf(
+      snapshot({
+        sessionQueue: [
+          { item: { id: "a1", uri: "ua1", trackId: "a1" }, ownerPubkey: ME, ownerName: "alice" },
+        ],
+      }),
+    );
+
     expect(queueOf(view, THEM, ME)).toEqual([]);
   });
 

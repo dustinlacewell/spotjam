@@ -12,6 +12,7 @@
 import {
   NULL_POINTER,
   appendUniqueTracks,
+  moveMany,
   type Participant,
   type PlaybackPointer,
   type Progress,
@@ -206,17 +207,10 @@ export class MockRoom implements Room {
     this.#mapMyQueue((queue) => queue.filter((item) => item.id !== itemId));
   }
 
-  /** Out-of-range indices leave the queue untouched, as the server has it. */
-  moveInMyQueue(fromIndex: number, toIndex: number): void {
+  moveManyInMyQueue(itemIds: string[], beforeItemId: string | null): void {
     this.#mapMyQueue((queue) => {
-      if (!isIndexInRange(fromIndex, queue.length) || !isIndexInRange(toIndex, queue.length)) {
-        return queue;
-      }
-      const next = [...queue];
-      const [moved] = next.splice(fromIndex, 1);
-      if (moved === undefined) return queue;
-      next.splice(toIndex, 0, moved);
-      return next;
+      const next = moveMany(queue, itemIds, beforeItemId);
+      return next === queue ? queue : [...next];
     });
   }
 
@@ -372,8 +366,4 @@ function advanceTo(state: MockState, itemId: string, now: number): MockState | n
     if (current.pointer.itemId === null) return null;
   }
   return null;
-}
-
-function isIndexInRange(index: number, length: number): boolean {
-  return Number.isInteger(index) && index >= 0 && index < length;
 }

@@ -31,6 +31,7 @@ function track(id: string): QueueItem {
 const A = track("a");
 const B = track("b");
 const C = track("c");
+const D = track("d");
 
 /**
  * Assert that `make()` produces a room obeying the port.
@@ -79,19 +80,19 @@ export function describeRoomContract(name: string, make: () => RoomHarness): voi
         });
       });
 
-      it("reorders on move", () => {
+      it("moves a block of items together, keeping their relative order", () => {
         withEmptyQueue(({ room }) => {
-          room.appendToMyQueue([A, B, C]);
-          room.moveInMyQueue(2, 0);
-          expect(room.myQueue().map((item) => item.id)).toEqual(["c", "a", "b"]);
+          room.appendToMyQueue([A, B, C, D]);
+          room.moveManyInMyQueue(["d", "b"], "a");
+          expect(room.myQueue().map((item) => item.id)).toEqual(["b", "d", "a", "c"]);
         });
       });
 
-      it("leaves the queue alone when move is out of range", () => {
+      it("moves a block to the end when beforeItemId is null", () => {
         withEmptyQueue(({ room }) => {
-          room.appendToMyQueue([A, B]);
-          room.moveInMyQueue(5, 0);
-          expect(room.myQueue().map((item) => item.id)).toEqual(["a", "b"]);
+          room.appendToMyQueue([A, B, C, D]);
+          room.moveManyInMyQueue(["a", "c"], null);
+          expect(room.myQueue().map((item) => item.id)).toEqual(["b", "d", "a", "c"]);
         });
       });
 

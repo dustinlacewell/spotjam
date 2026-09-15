@@ -156,7 +156,7 @@ export function QueueView({
                 source={queueSource}
                 importStatus={importStatus}
                 onLinks={(links) => handleLinks(links, appendTracks)}
-                onMove={(from, to) => room.moveInMyQueue(from, to)}
+                onMoveMany={(itemIds, beforeItemId) => room.moveManyInMyQueue(itemIds, beforeItemId)}
                 onSendToTop={(itemId) => room.sendToTopOfMyQueue(itemId)}
                 onRemove={(itemId) => room.removeFromMyQueue(itemId)}
                 onShuffle={() => room.shuffleMyQueue()}
@@ -173,7 +173,7 @@ export function QueueView({
               onReplaceQueue={(tracks) => room.replaceMyQueue(toQueueItems(tracks))}
               onQueueLinks={(links) => handleLinks(links, appendTracks)}
               onLinks={handleLinks}
-              onMove={(from, to) => room.moveInMyQueue(from, to)}
+              onMoveMany={(itemIds, beforeItemId) => room.moveManyInMyQueue(itemIds, beforeItemId)}
               onSendToTop={(itemId) => room.sendToTopOfMyQueue(itemId)}
               onRemove={(itemId) => room.removeFromMyQueue(itemId)}
               onShuffleQueue={() => room.shuffleMyQueue()}

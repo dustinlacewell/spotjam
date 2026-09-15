@@ -11,7 +11,8 @@ export function QueueItemCard({
   onSendToTop,
   draggable,
   isDragging,
-  isDropTarget,
+  isSelected,
+  onClick,
   onDragStart,
   onDragOver,
   onDrop,
@@ -26,7 +27,9 @@ export function QueueItemCard({
   onSendToTop?: () => void;
   draggable?: boolean;
   isDragging?: boolean;
-  isDropTarget?: boolean;
+  /** Part of the current multi-select, so a drag carries it along with the rest. */
+  isSelected?: boolean;
+  onClick?: (e: React.MouseEvent) => void;
   onDragStart?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
@@ -42,8 +45,10 @@ export function QueueItemCard({
     <Card
       as="li"
       interactive={Boolean(draggable)}
-      className={cardClass({ isPlaying, isDragging, isDropTarget, draggable })}
+      selected={isSelected}
+      className={cardClass({ isPlaying, isDragging, draggable })}
       draggable={draggable}
+      onClick={onClick}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -55,7 +60,7 @@ export function QueueItemCard({
         <p className={styles.artist}>{metadata?.artist ?? " "}</p>
       </div>
       <span className={styles.ownerSlot}>{label && <Chip>{label}</Chip>}</span>
-      <span className={`${styles.actionSlot} ${styles.sendToTopSlot}`}>
+      <span className={`${styles.actionSlot} ${styles.sendToTopSlot}`} onClick={stopPropagation}>
         {onSendToTop && (
           <IconButton
             label="Send to top"
@@ -69,7 +74,7 @@ export function QueueItemCard({
           </IconButton>
         )}
       </span>
-      <span className={styles.actionSlot}>
+      <span className={styles.actionSlot} onClick={stopPropagation}>
         {onRemove && (
           <IconButton
             label="Remove from queue"
@@ -87,21 +92,22 @@ export function QueueItemCard({
   );
 }
 
+function stopPropagation(e: React.MouseEvent): void {
+  e.stopPropagation();
+}
+
 function cardClass({
   isPlaying,
   isDragging,
-  isDropTarget,
   draggable,
 }: {
   isPlaying: boolean;
   isDragging?: boolean;
-  isDropTarget?: boolean;
   draggable?: boolean;
 }): string {
   const names = [styles.card];
   if (draggable) names.push(styles.cardDraggable);
   if (isPlaying) names.push(styles.cardPlaying);
   if (isDragging) names.push(styles.cardDragging);
-  if (isDropTarget) names.push(styles.cardDropTarget);
   return names.join(" ");
 }

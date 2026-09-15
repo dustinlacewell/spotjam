@@ -26,7 +26,7 @@ export function QueueTracks({
   source,
   importStatus,
   onLinks,
-  onMove,
+  onMoveMany,
   onSendToTop,
   onRemove,
   onShuffle,
@@ -36,7 +36,7 @@ export function QueueTracks({
   importStatus: string | null;
   /** Tracks join the queue; playlist links import as new playlists. */
   onLinks: (links: ParsedLinks) => void;
-  onMove: (fromIndex: number, toIndex: number) => void;
+  onMoveMany: (itemIds: string[], beforeItemId: string | null) => void;
   onSendToTop: (itemId: string) => void;
   onRemove: (itemId: string) => void;
   /** Randomizes your queue's play order for every peer. */
@@ -72,12 +72,12 @@ export function QueueTracks({
       {editable ? (
         <TrackDropZone onLinks={onLinks}>
           <div className={styles.tracksScroll}>
-            {listOf(source, { query, onMove, onSendToTop, onRemove })}
+            {listOf(source, { query, onMoveMany, onSendToTop, onRemove })}
           </div>
         </TrackDropZone>
       ) : (
         <div className={styles.tracksScroll}>
-          {listOf(source, { query, onMove, onSendToTop, onRemove })}
+          {listOf(source, { query, onMoveMany, onSendToTop, onRemove })}
         </div>
       )}
 
@@ -110,7 +110,7 @@ function listOf(
   source: QueueSource,
   handlers: {
     query: string;
-    onMove: (fromIndex: number, toIndex: number) => void;
+    onMoveMany: (itemIds: string[], beforeItemId: string | null) => void;
     onSendToTop: (itemId: string) => void;
     onRemove: (itemId: string) => void;
   },
@@ -123,7 +123,7 @@ function listOf(
     <MyQueueList
       items={source.items}
       query={handlers.query}
-      onMove={handlers.onMove}
+      onMoveMany={handlers.onMoveMany}
       onSendToTop={handlers.onSendToTop}
       onRemove={handlers.onRemove}
     />

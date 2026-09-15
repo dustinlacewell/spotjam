@@ -24,7 +24,7 @@ export function DetailPane({
   onReplaceQueue,
   onQueueLinks,
   onLinks,
-  onMove,
+  onMoveMany,
   onSendToTop,
   onRemove,
   onShuffleQueue,
@@ -42,7 +42,7 @@ export function DetailPane({
   onQueueLinks: (links: ParsedLinks) => void;
   /** Tracks land in the open playlist; playlist links import as new playlists. */
   onLinks: (links: ParsedLinks, onTracks: (tracks: ParsedTrack[]) => void) => void;
-  onMove: (fromIndex: number, toIndex: number) => void;
+  onMoveMany: (itemIds: string[], beforeItemId: string | null) => void;
   onSendToTop: (itemId: string) => void;
   onRemove: (itemId: string) => void;
   /** Randomizes your queue's play order. A playlist shuffles through the api. */
@@ -121,7 +121,7 @@ export function DetailPane({
           source={queue}
           importStatus={importStatus}
           onLinks={onQueueLinks}
-          onMove={onMove}
+          onMoveMany={onMoveMany}
           onSendToTop={onSendToTop}
           onRemove={onRemove}
           onShuffle={onShuffleQueue}

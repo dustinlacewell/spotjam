@@ -294,8 +294,8 @@ export class RoomClient implements Room {
     this.#sendOp(ops.remove(this.roomId, itemId));
   }
 
-  moveInMyQueue(fromIndex: number, toIndex: number): void {
-    this.#sendOp(ops.move(this.roomId, fromIndex, toIndex));
+  moveManyInMyQueue(itemIds: string[], beforeItemId: string | null): void {
+    this.#sendOp(ops.moveMany(this.roomId, itemIds, beforeItemId));
   }
 
   sendToTopOfMyQueue(itemId: string): void {

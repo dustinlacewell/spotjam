@@ -44,11 +44,17 @@ export interface RemoveOp {
   itemId: string;
 }
 
-export interface MoveOp {
-  type: "move";
+/**
+ * Reorder a block of items in one move: `itemIds` names the moved entries
+ * (their own relative order survives the move, not the array order here),
+ * `beforeItemId` names the entry the block lands before, or `null` for the
+ * end of the queue.
+ */
+export interface MoveManyOp {
+  type: "move-many";
   roomId: string;
-  fromIndex: number;
-  toIndex: number;
+  itemIds: string[];
+  beforeItemId: string | null;
 }
 
 export interface SendToTopOp {
@@ -136,7 +142,7 @@ export type Op =
   | SetBroadcastingOp
   | EnqueueOp
   | RemoveOp
-  | MoveOp
+  | MoveManyOp
   | SendToTopOp
   | ShuffleOp
   | ClearQueueOp
@@ -155,7 +161,7 @@ const OP_TYPES: ReadonlySet<string> = new Set<OpType>([
   "set-broadcasting",
   "enqueue",
   "remove",
-  "move",
+  "move-many",
   "send-to-top",
   "shuffle",
   "clear-queue",

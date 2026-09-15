@@ -48,7 +48,8 @@ export interface Room {
   appendToMyQueue(items: QueueItem[]): void;
   replaceMyQueue(items: QueueItem[]): void;
   removeFromMyQueue(itemId: string): void;
-  moveInMyQueue(fromIndex: number, toIndex: number): void;
+  /** Reorder a block of items in one move. `beforeItemId: null` sends them to the end. */
+  moveManyInMyQueue(itemIds: string[], beforeItemId: string | null): void;
   sendToTopOfMyQueue(itemId: string): void;
   shuffleMyQueue(): void;
   clearMyQueue(): void;

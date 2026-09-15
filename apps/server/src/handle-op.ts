@@ -78,11 +78,16 @@ function applyOp(
       if (!isNonEmptyString(op.itemId)) return malformed(state);
       return { state: Room.remove(state, pubkey, op.itemId) };
 
-    case "move":
-      if (!Number.isInteger(op.fromIndex) || !Number.isInteger(op.toIndex)) {
+    case "move-many":
+      if (
+        !Array.isArray(op.itemIds) ||
+        op.itemIds.length === 0 ||
+        !op.itemIds.every(isNonEmptyString) ||
+        (op.beforeItemId !== null && !isNonEmptyString(op.beforeItemId))
+      ) {
         return malformed(state);
       }
-      return { state: Room.move(state, pubkey, op.fromIndex, op.toIndex) };
+      return { state: Room.moveMany(state, pubkey, op.itemIds, op.beforeItemId) };
 
     case "send-to-top":
       if (!isNonEmptyString(op.itemId)) return malformed(state);

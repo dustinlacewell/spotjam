@@ -1,3 +1,4 @@
+import { Pause, Play, SkipForward } from "lucide-react";
 import { IconButton, ProgressBar, Thumbnail } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
 import { formatClock } from "../lib/progress";
@@ -58,7 +59,7 @@ export function NowPlaying({
           onClick={onTogglePause}
           label={isPaused ? "Resume" : "Pause"}
         >
-          {isPaused ? "▶" : "❚❚"}
+          {isPaused ? <Play size={16} strokeWidth={2} /> : <Pause size={16} strokeWidth={2} />}
         </IconButton>
         <IconButton
           shape="circle"
@@ -68,7 +69,7 @@ export function NowPlaying({
           onClick={onSkip}
           label="Skip"
         >
-          ⏭
+          <SkipForward size={16} strokeWidth={2} />
         </IconButton>
       </div>
     </div>

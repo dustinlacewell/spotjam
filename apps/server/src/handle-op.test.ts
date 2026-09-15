@@ -65,7 +65,7 @@ describe("handleOp", () => {
       { type: "clear-queue", roomId: "jam" },
       { type: "remove", roomId: "jam", itemId: "b1" },
       { type: "send-to-top", roomId: "jam", itemId: "b2" },
-      { type: "move", roomId: "jam", fromIndex: 0, toIndex: 1 },
+      { type: "move-many", roomId: "jam", itemIds: ["a1"], beforeItemId: null },
       { type: "shuffle", roomId: "jam" },
     ];
 
@@ -81,7 +81,8 @@ describe("handleOp", () => {
       { type: "enqueue", roomId: "jam", items: [{ id: "", uri: "", trackId: "" }] },
       { type: "remove", roomId: "jam", itemId: "" },
       { type: "send-to-top", roomId: "jam", itemId: "" },
-      { type: "move", roomId: "jam", fromIndex: 0.5, toIndex: 1 },
+      { type: "move-many", roomId: "jam", itemIds: [], beforeItemId: null },
+      { type: "move-many", roomId: "jam", itemIds: [""], beforeItemId: null },
       { type: "seek", roomId: "jam", positionMs: Number.NaN },
     ];
 
