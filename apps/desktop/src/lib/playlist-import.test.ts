@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { PlaylistFetchError } from "@spotjam/room";
-import { importPlaylist, type FetchedPlaylist, type FetchFailure } from "./playlist-import";
+import {
+  addTracksToPlaylist,
+  importPlaylist,
+  type FetchedPlaylist,
+  type FetchFailure,
+} from "./playlist-import";
 
 interface Call {
   cmd: string;
@@ -23,6 +28,7 @@ function failing(failure: unknown) {
 
 const PLAYLIST: FetchedPlaylist = {
   name: "Late night",
+  canAdd: true,
   tracks: [
     { uri: "spotify:track:aaaa1111", name: "One", artist: "A" },
     { uri: "spotify:track:bbbb2222", name: "Two", artist: "B" },
@@ -43,11 +49,21 @@ describe("importPlaylist", () => {
     expect(await importPlaylist(URI, invoke)).toEqual({
       playlistId: "pppp1111",
       name: "Late night",
+      canAdd: true,
       tracks: [
         { uri: "spotify:track:aaaa1111", trackId: "aaaa1111" },
         { uri: "spotify:track:bbbb2222", trackId: "bbbb2222" },
       ],
     });
+  });
+
+  /** Someone else's playlist, and anything that forgot to say. */
+  it("reports a playlist we cannot add to", async () => {
+    const refused = fakeInvoke({ ...PLAYLIST, canAdd: false });
+    expect((await importPlaylist(URI, refused.invoke)).canAdd).toBe(false);
+
+    const silent = fakeInvoke({ name: "Old", tracks: [] });
+    expect((await importPlaylist(URI, silent.invoke)).canAdd).toBe(false);
   });
 
   it("carries the playlist id through, so the playlist can stay linked", async () => {
@@ -74,10 +90,11 @@ describe("importPlaylist", () => {
   });
 
   it("yields an empty track list for an empty playlist", async () => {
-    const { invoke } = fakeInvoke({ name: "Nothing", tracks: [] });
+    const { invoke } = fakeInvoke({ name: "Nothing", canAdd: true, tracks: [] });
     expect(await importPlaylist(URI, invoke)).toEqual({
       playlistId: "pppp1111",
       name: "Nothing",
+      canAdd: true,
       tracks: [],
     });
   });
@@ -124,5 +141,46 @@ describe("importPlaylist failures", () => {
   it("keeps the message Rust sent", async () => {
     const failure: FetchFailure = { kind: "gone", message: "no such playlist" };
     await expect(importPlaylist(URI, failing(failure))).rejects.toThrow("no such playlist");
+  });
+});
+
+const TRACKS = [
+  { uri: "spotify:track:aaaa1111", trackId: "aaaa1111" },
+  { uri: "spotify:track:bbbb2222", trackId: "bbbb2222" },
+];
+
+describe("addTracksToPlaylist", () => {
+  it("sends the playlist uri and the track uris", async () => {
+    const { calls, invoke } = fakeInvoke(undefined as unknown as FetchedPlaylist);
+    await addTracksToPlaylist("pppp1111", TRACKS, invoke);
+    expect(calls).toEqual([
+      {
+        cmd: "spotify_add_to_playlist",
+        args: {
+          uri: "spotify:playlist:pppp1111",
+          trackUris: ["spotify:track:aaaa1111", "spotify:track:bbbb2222"],
+        },
+      },
+    ]);
+  });
+
+  it("does not call the command for an empty track list", async () => {
+    const { calls, invoke } = fakeInvoke(undefined as unknown as FetchedPlaylist);
+    await addTracksToPlaylist("pppp1111", [], invoke);
+    expect(calls).toEqual([]);
+  });
+
+  it("reports a refused write as a typed failure", async () => {
+    const failure: FetchFailure = { kind: "unreachable", message: "cannot add" };
+    await expect(addTracksToPlaylist("pppp1111", TRACKS, failing(failure))).rejects.toMatchObject({
+      reason: "unreachable",
+      message: "cannot add",
+    });
+  });
+
+  it("treats an untagged rejection as unreachable", async () => {
+    await expect(
+      addTracksToPlaylist("pppp1111", TRACKS, failing(new Error("boom"))),
+    ).rejects.toBeInstanceOf(PlaylistFetchError);
   });
 });

@@ -54,7 +54,13 @@ function withPublicFlag(list: Playlist): Playlist {
  * have, which would then be syncable and auto-droppable.
  */
 function withSource(list: Playlist): Playlist {
-  return isLinkedSource(list.source) ? list : { ...list, source: { kind: "local" } };
+  if (!isLinkedSource(list.source)) return { ...list, source: { kind: "local" } };
+  if (list.source.kind === "spotify" && typeof list.source.canAdd !== "boolean") {
+    // Stored before permission was tracked. Not addable until a sync says
+    // otherwise: offering a write Spotify will refuse is the worse mistake.
+    return { ...list, source: { ...list.source, canAdd: false } };
+  }
+  return list;
 }
 
 function isLinkedSource(source: PlaylistSource | undefined): boolean {

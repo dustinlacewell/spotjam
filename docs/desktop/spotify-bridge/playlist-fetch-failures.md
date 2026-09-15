@@ -1,7 +1,7 @@
 # Playlist fetch failures
 
-`fetch_playlist` splits its failures in two, and the split drives whether the
-app deletes one of the user's playlists.
+`fetch_playlist` and `add_to_playlist` split their failures in two, and the
+split drives whether the app deletes one of the user's playlists.
 
 - **Gone** — the client answered and said no such playlist. A linked playlist
   that gets this is dropped.
@@ -32,6 +32,24 @@ The injected script wraps `getPlaylist` in try/catch and returns
 `{ok: false, error}` as data. Letting the promise reject would surface in Rust
 as an opaque `JS exception:` blob wrapping a serialized stack trace, and
 telling the two failure kinds apart would mean substring-matching that.
+
+## Writing: the position argument
+
+`add(playlistUri, trackUris, position)` appends with
+`{ before: { type: "end" } }`.
+
+The position argument is **required**. It is destructured inside the client
+(`Cannot destructure property 'before' of 'e' as it is undefined`), so passing
+`undefined` throws, and `{before: null}` / `{after: null}` throw too
+(`Cannot convert undefined or null to object`). Verified against the
+signed-in client by adding a track and reading back its index.
+
+`remove(playlistUri, rows)` and `move` exist on the same object. Both key on
+row `uid`s, which `getContents` returns and `fetch_playlist` currently drops.
+
+Whether the signed-in user may write at all is `metadata.canAdd` on the
+`getPlaylist` result — false for a playlist someone else owns. The app reads
+it there rather than making a second `getMetadata` call.
 
 ## The timeout
 

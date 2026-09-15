@@ -146,8 +146,9 @@ const SERVICES: RoomServices = {
   trackMetadata: {
     resolve: (trackUri) => Promise.resolve(TRACKS[trackUri] ?? null),
   },
-  playlistImporter: {
+  playlistService: {
     import: () => Promise.reject(new Error("playlist import is off in this preview")),
+    addTracks: () => Promise.reject(new Error("playlist editing is off in this preview")),
   },
 };
 

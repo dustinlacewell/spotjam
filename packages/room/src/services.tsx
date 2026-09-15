@@ -3,12 +3,12 @@
 // would otherwise thread them through every layer, so they travel by context.
 
 import { createContext, useContext } from "react";
-import type { PlaylistImporter } from "./ports/playlist-importer";
+import type { PlaylistService } from "./ports/playlist-service";
 import type { TrackMetadataSource } from "./ports/track-metadata";
 
 export interface RoomServices {
   trackMetadata: TrackMetadataSource;
-  playlistImporter: PlaylistImporter;
+  playlistService: PlaylistService;
 }
 
 const RoomServicesContext = createContext<RoomServices | null>(null);

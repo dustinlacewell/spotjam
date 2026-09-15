@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ParsedTrack } from "./spotify-link";
 import {
+  canAddTracks,
   createPlaylist,
   createPlaylistWithTracks,
   deletePlaylist,
@@ -31,7 +32,7 @@ function lists(): Playlist[] {
 }
 
 /** A collection whose second playlist mirrors a Spotify playlist. */
-function withLinked(): Playlist[] {
+function withLinked(canAdd = true): Playlist[] {
   return [
     lists()[0],
     {
@@ -39,7 +40,7 @@ function withLinked(): Playlist[] {
       name: "From Spotify",
       tracks: [TRACK_A],
       isPublic: false,
-      source: { kind: "spotify", playlistId: "pppp1111", syncedAt: 1000 },
+      source: { kind: "spotify", playlistId: "pppp1111", syncedAt: 1000, canAdd },
     },
   ];
 }
@@ -58,7 +59,7 @@ describe("createPlaylistWithTracks", () => {
   });
 
   it("creates a linked playlist when given a Spotify source", () => {
-    const source = { kind: "spotify", playlistId: "pppp1111", syncedAt: 50 } as const;
+    const source = { kind: "spotify", playlistId: "pppp1111", syncedAt: 50, canAdd: true } as const;
     const next = createPlaylistWithTracks(lists(), "Linked", [TRACK_A], "three", source);
     expect(next[2].source).toEqual(source);
     expect(isEditable(next[2])).toBe(false);
@@ -298,14 +299,45 @@ describe("linkedPlaylistId", () => {
   });
 });
 
+describe("canAddTracks", () => {
+  it("is true for a local playlist", () => {
+    expect(canAddTracks(lists()[0])).toBe(true);
+  });
+
+  /** A link can point at anyone's playlist; only its owner may write. */
+  it("follows the link's permission for a linked playlist", () => {
+    expect(canAddTracks(withLinked(true)[1])).toBe(true);
+    expect(canAddTracks(withLinked(false)[1])).toBe(false);
+  });
+});
+
 describe("reconcileLinked", () => {
-  const fetched = { name: "Renamed in Spotify", tracks: [TRACK_B, TRACK_C] };
+  const fetched = { name: "Renamed in Spotify", tracks: [TRACK_B, TRACK_C], canAdd: true };
 
   it("replaces name and tracks and stamps the sync time", () => {
     const next = reconcileLinked(withLinked(), "linked", fetched, 2000);
     expect(next[1].name).toBe("Renamed in Spotify");
     expect(next[1].tracks).toEqual([TRACK_B, TRACK_C]);
-    expect(next[1].source).toEqual({ kind: "spotify", playlistId: "pppp1111", syncedAt: 2000 });
+    expect(next[1].source).toEqual({
+      kind: "spotify",
+      playlistId: "pppp1111",
+      syncedAt: 2000,
+      canAdd: true,
+    });
+  });
+
+  /** Access can open up or be withdrawn, so each sync restates it. */
+  it("restates the add permission from the fetch", () => {
+    const opened = reconcileLinked(withLinked(false), "linked", fetched, 2000);
+    expect(canAddTracks(opened[1])).toBe(true);
+
+    const closed = reconcileLinked(withLinked(true), "linked", { ...fetched, canAdd: false }, 2000);
+    expect(canAddTracks(closed[1])).toBe(false);
+  });
+
+  it("treats a fetch with no permission as not addable", () => {
+    const next = reconcileLinked(withLinked(true), "linked", { name: "X", tracks: [] }, 2000);
+    expect(canAddTracks(next[1])).toBe(false);
   });
 
   /** Spotify owns the content, so a track removed there is removed here. */
@@ -373,6 +405,7 @@ describe("unlinkPlaylist", () => {
       kind: "spotify",
       playlistId: "pppp1111",
       syncedAt: 1000,
+      canAdd: true,
     });
   });
 });

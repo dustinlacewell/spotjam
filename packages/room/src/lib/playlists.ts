@@ -14,7 +14,16 @@ import { shuffled } from "./shuffle";
  */
 export type PlaylistSource =
   | { kind: "local" }
-  | { kind: "spotify"; playlistId: string; syncedAt: number };
+  | {
+      kind: "spotify";
+      playlistId: string;
+      syncedAt: number;
+      /**
+       * Whether Spotify lets us add tracks to it. A link can point at anyone's
+       * playlist, and only its owner may write.
+       */
+      canAdd: boolean;
+    };
 
 export interface Playlist {
   id: string;
@@ -41,6 +50,16 @@ export function isEditable(playlist: Playlist): boolean {
 /** The Spotify playlist id a linked playlist mirrors, or null when local. */
 export function linkedPlaylistId(playlist: Playlist): string | null {
   return playlist.source.kind === "spotify" ? playlist.source.playlistId : null;
+}
+
+/**
+ * Whether tracks can be added to this playlist at all.
+ *
+ * A local playlist always takes them. A linked one takes them only when
+ * Spotify lets us write, because that is where they would have to land.
+ */
+export function canAddTracks(playlist: Playlist): boolean {
+  return playlist.source.kind === "local" ? true : playlist.source.canAdd;
 }
 
 /**
@@ -95,7 +114,7 @@ export function createPlaylistWithTracks(
 export function reconcileLinked(
   lists: Playlist[],
   id: string,
-  fetched: { name: string; tracks: ParsedTrack[] },
+  fetched: { name: string; tracks: ParsedTrack[]; canAdd?: boolean },
   syncedAt: number,
 ): Playlist[] {
   return mapList(lists, id, (list) => {
@@ -105,7 +124,13 @@ export function reconcileLinked(
       ...list,
       name,
       tracks: [...appendUniqueTracks([], fetched.tracks)],
-      source: { ...list.source, syncedAt },
+      source: {
+        ...list.source,
+        syncedAt,
+        // Permission can change under us — a collaborative playlist opened up,
+        // or access withdrawn — so each sync restates it.
+        canAdd: fetched.canAdd ?? false,
+      },
     };
   });
 }

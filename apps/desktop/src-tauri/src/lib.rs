@@ -21,6 +21,7 @@ pub fn run() {
             spotify::spotify_clear_queue,
             spotify::spotify_get_queue,
             spotify::spotify_fetch_playlist,
+            spotify::spotify_add_to_playlist,
             spotify::spotify_fetch_tracks,
             identity::identity_load,
             identity::identity_create,

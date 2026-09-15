@@ -42,6 +42,10 @@ static ENSURE_PLAYLIST_API_JS: LazyLock<String> = LazyLock::new(|| {
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistContents {
     pub name: String,
+    /// Whether the signed-in user may add tracks to this playlist. False for
+    /// someone else's: a linked playlist can be anyone's, and only the owner
+    /// can write to it.
+    pub can_add: bool,
     pub tracks: Vec<PlaylistTrack>,
 }
 
@@ -165,6 +169,7 @@ async fn fetch_inner(
                 return JSON.stringify({{
                     ok: true,
                     name: r?.metadata?.name ?? "",
+                    canAdd: r?.metadata?.canAdd === true,
                     tracks,
                 }});
             }} catch (e) {{
@@ -198,7 +203,80 @@ fn parse_fetch_result(parsed: &Value) -> std::result::Result<PlaylistContents, P
         .map(|items| items.iter().filter_map(track_from_json).collect())
         .unwrap_or_default();
 
-    Ok(PlaylistContents { name, tracks })
+    Ok(PlaylistContents {
+        name,
+        // Absent reads as false: offering an add that the client will refuse is
+        // worse than hiding one that would have worked.
+        can_add: parsed["canAdd"].as_bool().unwrap_or(false),
+        tracks,
+    })
+}
+
+/// Appends tracks to a Spotify playlist through the signed-in client.
+///
+/// The playlist service owns the content, so an add goes to Spotify rather
+/// than to any local copy. A linked playlist then picks the tracks up on its
+/// next sync.
+pub async fn add_to_playlist(
+    cdp: &CdpClient,
+    uri: String,
+    track_uris: Vec<String>,
+) -> std::result::Result<(), PlaylistError> {
+    match tokio::time::timeout(FETCH_TIMEOUT, add_inner(cdp, uri, track_uris)).await {
+        Ok(result) => result,
+        Err(_) => Err(PlaylistError::unreachable(
+            "timed out waiting for Spotify to add the tracks",
+        )),
+    }
+}
+
+async fn add_inner(
+    cdp: &CdpClient,
+    uri: String,
+    track_uris: Vec<String>,
+) -> std::result::Result<(), PlaylistError> {
+    if track_uris.is_empty() {
+        return Ok(());
+    }
+
+    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::unreachable)?;
+    ensure_playlist_api(cdp)
+        .await
+        .map_err(PlaylistError::unreachable)?;
+
+    let uri_json = serde_json::to_string(&playlist_uri).map_err(PlaylistError::unreachable)?;
+    let tracks_json = serde_json::to_string(&track_uris).map_err(PlaylistError::unreachable)?;
+
+    // The position argument is required and destructured, so it cannot be
+    // omitted: `undefined` and `null` both throw. `{before:{type:"end"}}` is
+    // the append spec. Verified against the signed-in client.
+    let expr = format!(
+        r#"(async () => {{
+            try {{
+                await window.__playlistApi.add(
+                    {uri_json},
+                    {tracks_json},
+                    {{ before: {{ type: "end" }} }},
+                );
+                return JSON.stringify({{ ok: true }});
+            }} catch (e) {{
+                return JSON.stringify({{ ok: false, error: String(e?.message ?? e) }});
+            }}
+        }})()"#
+    );
+
+    let value: Value = cdp.evaluate(&expr).await.map_err(PlaylistError::unreachable)?;
+    let json_str = value.as_str().ok_or_else(|| {
+        PlaylistError::unreachable(format!("add did not return a JSON string: {value}"))
+    })?;
+    let parsed: Value = serde_json::from_str(json_str).map_err(PlaylistError::unreachable)?;
+
+    if parsed["ok"].as_bool() == Some(true) {
+        return Ok(());
+    }
+    Err(classify_js_failure(
+        parsed["error"].as_str().unwrap_or("add failed"),
+    ))
 }
 
 fn track_from_json(item: &Value) -> Option<PlaylistTrack> {
@@ -338,12 +416,14 @@ mod tests {
         let value = serde_json::json!({
             "ok": true,
             "name": "Late night",
+            "canAdd": true,
             "tracks": [
                 { "uri": "spotify:track:aaaa1111", "name": "One", "artist": "A" },
             ],
         });
         let contents = parse_fetch_result(&value).unwrap();
         assert_eq!(contents.name, "Late night");
+        assert!(contents.can_add);
         assert_eq!(contents.tracks.len(), 1);
         assert_eq!(contents.tracks[0].uri, "spotify:track:aaaa1111");
     }
@@ -354,6 +434,16 @@ mod tests {
         let contents = parse_fetch_result(&value).unwrap();
         assert_eq!(contents.name, "Nothing");
         assert!(contents.tracks.is_empty());
+    }
+
+    /// Someone else's playlist. Absent or false both mean no write.
+    #[test]
+    fn reads_a_playlist_we_cannot_add_to() {
+        let refused = serde_json::json!({ "ok": true, "name": "Theirs", "canAdd": false, "tracks": [] });
+        assert!(!parse_fetch_result(&refused).unwrap().can_add);
+
+        let absent = serde_json::json!({ "ok": true, "name": "Old", "tracks": [] });
+        assert!(!parse_fetch_result(&absent).unwrap().can_add);
     }
 
     #[test]

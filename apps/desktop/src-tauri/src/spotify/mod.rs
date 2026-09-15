@@ -185,6 +185,23 @@ pub async fn spotify_fetch_playlist(
         .await
 }
 
+/// Appends tracks to a Spotify playlist through the signed-in client.
+///
+/// Spotify owns a linked playlist's content, so an add goes there rather than
+/// to any local copy; the playlist picks the tracks up on its next sync.
+#[tauri::command]
+pub async fn spotify_add_to_playlist(
+    bridge: tauri::State<'_, SpotifyBridge>,
+    uri: String,
+    track_uris: Vec<String>,
+) -> Result<(), PlaylistError> {
+    bridge
+        .with_client_typed(|client| {
+            Box::pin(playlist_api::add_to_playlist(client, uri, track_uris))
+        })
+        .await
+}
+
 /// Looks up display metadata for several tracks through the signed-in
 /// client. One entry per id, in order; `None` where the id is unknown.
 #[tauri::command]

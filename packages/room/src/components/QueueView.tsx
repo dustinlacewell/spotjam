@@ -10,7 +10,7 @@ import type {
 import type { Playlist } from "../lib/playlists";
 import type { ConnectionStatus } from "../lib/room-client";
 import type { Room } from "../ports/room";
-import type { ImportedPlaylist } from "../ports/playlist-importer";
+import type { ImportedPlaylist } from "../ports/playlist-service";
 import { toQueueItems } from "../lib/room-client";
 import { toSharedPlaylists } from "../lib/playlists";
 import { displayedProgress } from "../lib/progress";
@@ -43,8 +43,8 @@ export function QueueView({
 }) {
   const { status, participants, sessionQueue, pointer, myProgress, myQueue, queueOf, error } =
     useRoomSnapshot(room);
-  const { playlistImporter } = useRoomServices();
-  const playlistsApi = usePlaylists(playlistImporter);
+  const { playlistService } = useRoomServices();
+  const playlistsApi = usePlaylists(playlistService);
   const [selection, setSelection] = useState<Selection>("session");
   const [pane, setPane] = useState<PaneSelection>(QUEUE_PANE);
   const now = useNowTicker(pointer.itemId !== null);
@@ -83,6 +83,7 @@ export function QueueView({
             kind: "spotify",
             playlistId: imported.playlistId,
             syncedAt: Date.now(),
+            canAdd: imported.canAdd,
           }),
         );
       });
@@ -344,7 +345,7 @@ function usePlaylistImport(): {
   importStatus: string | null;
   startImports: (playlists: ParsedPlaylist[], onImported: (imported: ImportedPlaylist) => void) => void;
 } {
-  const { playlistImporter } = useRoomServices();
+  const { playlistService } = useRoomServices();
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const startImports = useCallback(
@@ -356,7 +357,7 @@ function usePlaylistImport(): {
 
       void Promise.all(
         playlists.map(async (playlist) => {
-          const imported = await playlistImporter.import(playlist.uri);
+          const imported = await playlistService.import(playlist.uri);
           onImported(imported);
         }),
       ).then(
@@ -364,7 +365,7 @@ function usePlaylistImport(): {
         (error: unknown) => setImportStatus(`Couldn't import that playlist: ${messageOf(error)}`),
       );
     },
-    [playlistImporter],
+    [playlistService],
   );
 
   // Clear a failure line on its own rather than leaving it up forever.

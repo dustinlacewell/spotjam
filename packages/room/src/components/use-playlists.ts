@@ -16,7 +16,7 @@ import {
   type PlaylistSource,
 } from "../lib/playlists";
 import { loadPlaylists, savePlaylists } from "../lib/playlists-store";
-import { isGone, type PlaylistImporter } from "../ports/playlist-importer";
+import { isGone, type PlaylistService } from "../ports/playlist-service";
 
 /** How a linked playlist's last sync attempt ended. */
 export type SyncState = "idle" | "syncing" | "unreachable";
@@ -45,6 +45,14 @@ export interface PlaylistsApi {
   unlink(id: string): void;
   /** How the last sync of each linked playlist ended, by playlist id. */
   syncStateOf(id: string): SyncState;
+  /**
+   * Appends tracks to a playlist, wherever that playlist's content lives.
+   *
+   * A local playlist takes them directly. A linked one is owned by Spotify, so
+   * the tracks are written there and the playlist syncs to pick them up —
+   * otherwise the next sync would throw them away.
+   */
+  addTracks(id: string, tracks: ParsedTrack[]): void;
 }
 
 /**
@@ -55,7 +63,7 @@ export interface PlaylistsApi {
  * Syncing a linked playlist is the one thing here that reaches outside, so the
  * importer arrives as an argument rather than being reached for directly.
  */
-export function usePlaylists(importer?: PlaylistImporter): PlaylistsApi {
+export function usePlaylists(service?: PlaylistService): PlaylistsApi {
   const [playlists, setPlaylists] = useState<Playlist[]>(loadPlaylists);
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
   // One fetch per playlist at a time. Two syncs of the same playlist racing
@@ -77,7 +85,7 @@ export function usePlaylists(importer?: PlaylistImporter): PlaylistsApi {
 
   const sync = useCallback(
     (id: string) => {
-      if (!importer) return;
+      if (!service) return;
       if (inFlight.current.has(id)) return;
 
       // Read the link off current state rather than trusting a caller's copy:
@@ -92,7 +100,7 @@ export function usePlaylists(importer?: PlaylistImporter): PlaylistsApi {
       inFlight.current.add(id);
       setSyncState(id, "syncing");
 
-      void importer.import(`spotify:playlist:${playlistId}`).then(
+      void service.import(`spotify:playlist:${playlistId}`).then(
         (imported) => {
           inFlight.current.delete(id);
           setSyncState(id, "idle");
@@ -112,7 +120,35 @@ export function usePlaylists(importer?: PlaylistImporter): PlaylistsApi {
         },
       );
     },
-    [importer, apply, setSyncState],
+    [service, apply, setSyncState],
+  );
+
+  const addTracks = useCallback(
+    (id: string, tracks: ParsedTrack[]) => {
+      if (tracks.length === 0) return;
+
+      // Read the link off current state: only Spotify can hold a linked
+      // playlist's tracks, and only the local store can hold a local one's.
+      let playlistId: string | null = null;
+      setPlaylists((lists) => {
+        playlistId = linkedPlaylistId(lists.find((l) => l.id === id) ?? ({} as Playlist)) ?? null;
+        return lists;
+      });
+
+      if (playlistId === null) {
+        apply((l) => insertTracksIntoPlaylist(l, id, tracks, null));
+        return;
+      }
+      if (!service) return;
+
+      // The write lands in Spotify; the sync brings it back. Syncing rather
+      // than inserting locally keeps Spotify's order and ids authoritative.
+      void service.addTracks(playlistId, tracks).then(
+        () => sync(id),
+        () => setSyncState(id, "unreachable"),
+      );
+    },
+    [service, apply, sync, setSyncState],
   );
 
   return {
@@ -150,5 +186,6 @@ export function usePlaylists(importer?: PlaylistImporter): PlaylistsApi {
     sync,
     unlink: useCallback((id: string) => apply((l) => unlinkPlaylist(l, id)), [apply]),
     syncStateOf: useCallback((id: string) => syncStates[id] ?? "idle", [syncStates]),
+    addTracks,
   };
 }

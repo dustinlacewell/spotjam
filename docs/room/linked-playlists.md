@@ -47,6 +47,26 @@ predicate:
 Unlinking keeps the tracks the playlist holds right now and makes it an
 ordinary local playlist.
 
+## Adding tracks
+
+The one edit a linked playlist does take is an add, from the track context
+menu — because it does not edit the local copy at all. The tracks are
+appended to the **Spotify playlist**, and the playlist then syncs to pick them
+up. A local insert would only survive until the next sync.
+
+`canAddTracks` decides whether the playlist appears in that menu:
+
+- A local playlist always takes tracks.
+- A linked one takes them only when Spotify says we may write.
+
+A link can point at anyone's playlist, and only its owner may write to one.
+So a linked playlist you do not own is simply absent from "add to playlist" —
+there is no failure to report, because the action is never offered.
+
+Permission is stored on the source as `canAdd` and restated by every sync:
+access can open up or be withdrawn. A link stored before permission was
+tracked loads as not addable until its first sync.
+
 ## Sync
 
 Opening a linked playlist syncs it, and a Sync button in its header does the
@@ -80,8 +100,15 @@ tell us.
 ## Not built
 
 There is no way to list the user's playlists. No rootlist or library service
-is resolved or documented. Linking starts from a pasted or dropped link. A
-"pick from your playlists" browser needs a new service discovered first.
+is resolved. `getList`/`getListContents` reject every rootlist URI tried
+(`spotify:user:@:rootlist`, `spotify:user:rootlist`, `spotify:rootlist`,
+`spotify:internal:rootlist`) with `Invalid list response!`. Linking starts
+from a pasted or dropped link. A "pick from your playlists" browser needs a
+new service discovered first.
+
+Removing a track from a linked playlist, and reordering one, are not built.
+`_playlistAPI.remove` and `.move` exist and key on row `uid`s, which
+`fetch_playlist` currently discards.
 
 `fetch_playlist` drops non-track entries (local files, episodes), so a linked
 playlist can differ from what Spotify shows.

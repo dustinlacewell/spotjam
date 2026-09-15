@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 const LOCAL = { kind: "local" } as const;
-const LINK = { kind: "spotify", playlistId: "pppp1111", syncedAt: 1000 } as const;
+const LINK = { kind: "spotify", playlistId: "pppp1111", syncedAt: 1000, canAdd: true } as const;
 
 describe("loadPlaylists", () => {
   it("loads a playlist stored before sharing existed as private", () => {
@@ -88,6 +88,26 @@ describe("loadPlaylists and the playlist source", () => {
     ];
     savePlaylists(lists);
     expect(loadPlaylists()).toEqual(lists);
+  });
+
+  /**
+   * Stored before permission was tracked. Not addable until a sync says
+   * otherwise: offering a write Spotify will refuse is the worse mistake.
+   */
+  it("loads a link stored without a permission as not addable", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([
+        {
+          id: "one",
+          name: "From Spotify",
+          tracks: [],
+          isPublic: false,
+          source: { kind: "spotify", playlistId: "pppp1111", syncedAt: 1000 },
+        },
+      ]),
+    );
+    expect(loadPlaylists()[0].source).toEqual({ ...LINK, canAdd: false });
   });
 
   /**

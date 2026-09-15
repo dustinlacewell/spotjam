@@ -8,12 +8,12 @@ import { SyncDriver } from "./lib/sync-driver";
 import { loadIdentity, type StoredIdentity } from "./lib/identity";
 import { loadSessionPrefs, saveSessionPrefs } from "./lib/session-prefs";
 import { tauriTrackMetadata } from "./lib/track-metadata";
-import { tauriPlaylistImporter } from "./lib/playlist-import";
+import { tauriPlaylistService } from "./lib/playlist-import";
 
 /** The desktop shell's answer to what @spotjam/room asks of its surroundings. */
 const SERVICES: RoomServices = {
   trackMetadata: tauriTrackMetadata,
-  playlistImporter: tauriPlaylistImporter,
+  playlistService: tauriPlaylistService,
 };
 
 interface Session {

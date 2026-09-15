@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ContextMenu, ContextMenuItem, type Point } from "@spotjam/ui";
 import type { PlaylistTrack } from "@spotjam/protocol";
-import { defaultPlaylistName } from "../lib/playlists";
+import { canAddTracks, defaultPlaylistName } from "../lib/playlists";
 import { filterPlaylists, shouldShowFilter } from "../lib/playlist-filter";
 import { usePlaylistsApi } from "./playlists-context";
 import styles from "./TrackContextMenu.module.css";
@@ -16,7 +16,7 @@ export function TrackContextMenu({
   tracks: PlaylistTrack[];
   onClose: () => void;
 }) {
-  const { playlists, insertTracks, createWithTracks } = usePlaylistsApi();
+  const { playlists, addTracks, createWithTracks } = usePlaylistsApi();
   const [query, setQuery] = useState("");
   const [openedAt, setOpenedAt] = useState(at);
 
@@ -28,8 +28,12 @@ export function TrackContextMenu({
     if (at !== null) setQuery("");
   }
 
-  const filtering = shouldShowFilter(playlists.length);
-  const matches = filterPlaylists(playlists, query);
+  // A linked playlist someone else owns has nowhere to put the tracks: the
+  // write would go to Spotify and be refused. Leave it out rather than offer
+  // an action that cannot work.
+  const addable = playlists.filter(canAddTracks);
+  const filtering = shouldShowFilter(addable.length);
+  const matches = filterPlaylists(addable, query);
 
   return (
     <ContextMenu at={at} onClose={onClose}>
@@ -50,13 +54,15 @@ export function TrackContextMenu({
       {matches.map((playlist) => (
         <ContextMenuItem
           key={playlist.id}
-          onSelect={() => insertTracks(playlist.id, tracks, null)}
+          onSelect={() => addTracks(playlist.id, tracks)}
         >
           Add to “{playlist.name}”
         </ContextMenuItem>
       ))}
       <ContextMenuItem
         onSelect={() => createWithTracks(defaultPlaylistName(playlists.map((p) => p.name)), tracks)}
+        /* Named against every playlist, not just the addable ones, so a new
+           playlist never takes a name already on screen. */
       >
         New playlist
       </ContextMenuItem>

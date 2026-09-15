@@ -9,12 +9,12 @@ export type { MockParticipant, MockPlaying, MockRoomSeed } from "./mock/mock-roo
 
 export type { TrackInfo, TrackMetadataSource } from "./ports/track-metadata";
 
-export { PlaylistFetchError, isGone } from "./ports/playlist-importer";
+export { PlaylistFetchError, isGone } from "./ports/playlist-service";
 export type {
   ImportedPlaylist,
   PlaylistFetchFailure,
-  PlaylistImporter,
-} from "./ports/playlist-importer";
+  PlaylistService,
+} from "./ports/playlist-service";
 
 // Room client core — pure op building and snapshot folding.
 
@@ -68,6 +68,7 @@ export type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "./lib/spotify-lin
 // Playlists.
 
 export {
+  canAddTracks,
   createPlaylist,
   createPlaylistWithTracks,
   deletePlaylist,
