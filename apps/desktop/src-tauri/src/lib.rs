@@ -1,6 +1,5 @@
 mod identity;
 mod spotify;
-mod track_metadata;
 
 use spotify::SpotifyBridge;
 
@@ -20,7 +19,7 @@ pub fn run() {
             spotify::spotify_clear_queue,
             spotify::spotify_get_queue,
             spotify::spotify_fetch_playlist,
-            track_metadata::fetch_track_metadata,
+            spotify::spotify_fetch_tracks,
             identity::identity_load,
             identity::identity_create,
             identity::identity_sign,

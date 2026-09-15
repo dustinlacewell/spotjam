@@ -2,9 +2,12 @@ mod cdp;
 mod launcher;
 mod player_api;
 mod playlist_api;
+mod registry;
+mod track_api;
 
 pub use player_api::PlayerState;
 pub use playlist_api::PlaylistContents;
+pub use track_api::TrackMetadata;
 
 use cdp::CdpClient;
 use tokio::sync::Mutex;
@@ -138,5 +141,17 @@ pub async fn spotify_fetch_playlist(
 ) -> Result<PlaylistContents, String> {
     bridge
         .with_client(|client| Box::pin(playlist_api::fetch_playlist(client, uri)))
+        .await
+}
+
+/// Looks up display metadata for several tracks through the signed-in
+/// client. One entry per id, in order; `None` where the id is unknown.
+#[tauri::command]
+pub async fn spotify_fetch_tracks(
+    bridge: tauri::State<'_, SpotifyBridge>,
+    track_ids: Vec<String>,
+) -> Result<Vec<Option<TrackMetadata>>, String> {
+    bridge
+        .with_client(|client| Box::pin(track_api::fetch_tracks(client, track_ids)))
         .await
 }
