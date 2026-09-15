@@ -80,6 +80,15 @@ export function usePlaylists(service?: PlaylistService): PlaylistsApi {
   // every selection.
   const inFlight = useRef<Set<string>>(new Set());
 
+  // What the writes below read to find a playlist.
+  //
+  // It has to be a ref, not the state variable: a callback that closed over
+  // `playlists` would change identity on every edit, and `sync` is a
+  // dependency of the effect that syncs a playlist on open — so each sync
+  // would re-arm that effect and sync again, forever.
+  const playlistsRef = useRef(playlists);
+  playlistsRef.current = playlists;
+
   const apply = useCallback((update: (lists: Playlist[]) => Playlist[]) => {
     setPlaylists((lists) => {
       const next = update(lists);
@@ -99,11 +108,8 @@ export function usePlaylists(service?: PlaylistService): PlaylistsApi {
 
       // Read the link off current state rather than trusting a caller's copy:
       // the playlist may have been unlinked since the call was wired up.
-      let playlistId: string | null = null;
-      setPlaylists((lists) => {
-        playlistId = linkedPlaylistId(lists.find((l) => l.id === id) ?? ({} as Playlist)) ?? null;
-        return lists;
-      });
+      const playlist = playlistsRef.current.find((l) => l.id === id);
+      const playlistId = playlist ? linkedPlaylistId(playlist) : null;
       if (!playlistId) return;
 
       inFlight.current.add(id);
@@ -139,14 +145,10 @@ export function usePlaylists(service?: PlaylistService): PlaylistsApi {
    * playlist may have been unlinked, and its rows resynced, since the handler
    * was wired up.
    */
-  const currentPlaylist = useCallback((id: string): Playlist | null => {
-    let found: Playlist | null = null;
-    setPlaylists((lists) => {
-      found = lists.find((l) => l.id === id) ?? null;
-      return lists;
-    });
-    return found;
-  }, []);
+  const currentPlaylist = useCallback(
+    (id: string): Playlist | null => playlistsRef.current.find((l) => l.id === id) ?? null,
+    [],
+  );
 
   const addTracks = useCallback(
     (id: string, tracks: ParsedTrack[]) => {
