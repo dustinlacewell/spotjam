@@ -1,4 +1,5 @@
-import { Pill, StatusDot } from "@spotjam/ui";
+import { Pill } from "@spotjam/ui";
+import styles from "./BroadcastToggle.module.css";
 
 export function BroadcastToggle({
   broadcasting,
@@ -12,14 +13,14 @@ export function BroadcastToggle({
       active={broadcasting}
       tone="accent"
       onClick={onToggle}
+      className={styles.pill}
       title={
         broadcasting
           ? "You are broadcasting. Your queue feeds the session."
           : "Start broadcasting to feed your queue into the session."
       }
     >
-      <StatusDot tone="current" pulse={broadcasting} glow={broadcasting} />
-      {broadcasting ? "Broadcasting" : "Broadcast"}
+      {broadcasting ? "Broadcaster" : "Listener"}
     </Pill>
   );
 }

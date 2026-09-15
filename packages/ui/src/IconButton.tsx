@@ -29,6 +29,7 @@ export interface IconButtonProps {
   shape?: "square" | "circle";
   tone?: IconButtonTone;
   revealOnHover?: boolean;
+  className?: string;
 }
 
 export function IconButton({
@@ -40,13 +41,17 @@ export function IconButton({
   shape = "square",
   tone = "neutral",
   revealOnHover = false,
+  className: extraClassName,
 }: IconButtonProps) {
   const className = [
     styles.base,
     shapeClass[shape],
     sizeClass[size],
     toneClass[tone],
-  ].join(" ");
+    extraClassName,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <button

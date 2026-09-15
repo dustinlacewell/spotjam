@@ -48,7 +48,7 @@
   white-space: nowrap;
 }
 
-/* currentColor so the count rides the accent fill on the selected row. */
+/* currentColor so the count matches the row's own text color, accent or not. */
 .rowCount {
   font-size: 11px;
   color: currentColor;
@@ -82,8 +82,14 @@
 .tracksHeader {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--space-3);
+}
+
+.tracksHeader > :first-child {
+  flex: 1;
+  min-width: 0;
+  max-width: 240px;
 }
 
 .tracksActions {

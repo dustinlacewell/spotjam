@@ -17,6 +17,7 @@ export interface PillProps {
   onClick?: () => void;
   as?: "button" | "span";
   title?: string;
+  className?: string;
 }
 
 export function Pill({
@@ -27,6 +28,7 @@ export function Pill({
   onClick,
   as = "button",
   title,
+  className: extraClassName,
 }: PillProps) {
   const isButton = as === "button";
 
@@ -35,6 +37,7 @@ export function Pill({
     toneClass[tone],
     isButton ? (disabled ? styles.disabled : styles.interactive) : styles.static,
     active ? styles.active : undefined,
+    extraClassName,
   ]
     .filter(Boolean)
     .join(" ");

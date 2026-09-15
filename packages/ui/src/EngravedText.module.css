@@ -1,0 +1,13 @@
+/* Text stamped into the panel rather than printed on it: a dark cut above
+   the letterform, a hairline light rim catching along its lower edge. */
+.base {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--border);
+  text-shadow:
+    0 -1px 1px rgba(0, 0, 0, 0.8),
+    0 1px 0 rgba(255, 255, 255, 0.15);
+}

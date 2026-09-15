@@ -7,6 +7,7 @@ import styles from "./PlaylistsPanel.module.css";
 export function PlaylistList({
   playlists,
   queueCount,
+  queueLabel,
   selected,
   renamingId,
   readOnly,
@@ -20,6 +21,8 @@ export function PlaylistList({
   playlists: Playlist[];
   /** Track count for the pinned queue row. */
   queueCount: number;
+  /** "Your queue" on your own page, "{name}'s queue" on someone else's. */
+  queueLabel: string;
   selected: PaneSelection;
   renamingId: string | null;
   /** Someone else's page: no creating, renaming or deleting. */
@@ -39,10 +42,9 @@ export function PlaylistList({
             as="div"
             className={styles.row}
             selected={selected === QUEUE_PANE}
-            selectionStyle="fill"
             onClick={() => onSelect(QUEUE_PANE)}
           >
-            <span className={styles.rowName}>Current queue</span>
+            <span className={styles.rowName}>{queueLabel}</span>
             <span className={styles.rowCount}>{queueCount}</span>
             {!readOnly && <span className={styles.actionSpacer} />}
           </ListRow>
@@ -61,7 +63,6 @@ export function PlaylistList({
                 as="div"
                 className={styles.row}
                 selected={playlist.id === selected}
-                selectionStyle="fill"
                 onClick={() => onSelect(playlist.id)}
                 onDoubleClick={() => !readOnly && onStartRename(playlist.id)}
               >

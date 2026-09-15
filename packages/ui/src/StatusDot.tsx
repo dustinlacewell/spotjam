@@ -1,11 +1,12 @@
 import styles from "./StatusDot.module.css";
 
-export type StatusDotTone = "accent" | "muted" | "danger" | "current";
+export type StatusDotTone = "accent" | "muted" | "danger" | "warning" | "current";
 
 const toneClass: Record<StatusDotTone, string> = {
   accent: styles.accent,
   muted: styles.muted,
   danger: styles.danger,
+  warning: styles.warning,
   current: styles.current,
 };
 

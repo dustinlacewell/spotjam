@@ -173,7 +173,6 @@ function RoomRow({
       layout="grid"
       gridTemplate={ROOM_GRID}
       selected={isSelected}
-      selectionStyle="outline"
       onClick={() => onSelect(room.roomId)}
     >
       <span className={styles.roomRowName}>{room.roomId}</span>

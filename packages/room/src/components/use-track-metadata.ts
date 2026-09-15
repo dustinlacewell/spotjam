@@ -21,3 +21,25 @@ export function useTrackMetadata(trackUri: string): TrackInfo | null {
 
   return metadata;
 }
+
+/** Resolves metadata for a list of tracks at once, keyed by URI. */
+export function useTrackMetadataMap(trackUris: string[]): Map<string, TrackInfo> {
+  const { trackMetadata } = useRoomServices();
+  const [metadata, setMetadata] = useState<Map<string, TrackInfo>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    for (const uri of trackUris) {
+      if (uri === "" || metadata.has(uri)) continue;
+      void trackMetadata.resolve(uri).then((result) => {
+        if (cancelled || !result) return;
+        setMetadata((prev) => new Map(prev).set(uri, result));
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [trackUris, trackMetadata]);
+
+  return metadata;
+}

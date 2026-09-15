@@ -1,5 +1,7 @@
 .base {
   display: inline-block;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.6);
   border-radius: var(--radius-circle);
   flex-shrink: 0;
 }
@@ -18,6 +20,10 @@
   background: var(--danger);
 }
 
+.warning {
+  background: var(--warning);
+}
+
 /* Takes the parent's text color, so the dot matches the pill or label
    it sits inside. */
 .current {
@@ -31,6 +37,7 @@
 .glow {
   box-shadow: 0 0 0 4px var(--accent-glow);
 }
+
 
 .pulse {
   animation: ui-pulse 2s infinite;

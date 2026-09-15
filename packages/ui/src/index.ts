@@ -20,7 +20,7 @@ export { Card } from "./Card";
 export type { CardTone, CardPadding } from "./Card";
 
 export { ListRow } from "./ListRow";
-export type { ListRowSelectionStyle, ListRowLayout } from "./ListRow";
+export type { ListRowLayout } from "./ListRow";
 
 export { SegmentedControl } from "./SegmentedControl";
 export type { SegmentedOption } from "./SegmentedControl";
@@ -36,3 +36,5 @@ export { Mark } from "./Mark";
 export type { MarkSize } from "./Mark";
 
 export { CenteredCardPage } from "./CenteredCardPage";
+
+export { EngravedText } from "./EngravedText";

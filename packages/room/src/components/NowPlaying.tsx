@@ -1,4 +1,4 @@
-import { IconButton, ProgressBar, StatusDot, Thumbnail } from "@spotjam/ui";
+import { IconButton, ProgressBar, Thumbnail } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
 import { formatClock } from "../lib/progress";
 import { useTrackMetadata } from "./use-track-metadata";
@@ -43,30 +43,31 @@ export function NowPlaying({
       <Thumbnail src={metadata?.thumbnailUrl ?? null} size={96} radius="md" />
       <div className={styles.info}>
         <div className={isPaused ? styles.labelIdle : styles.label}>
-          <StatusDot
-            tone={isPaused ? "muted" : "current"}
-            size={7}
-            pulse={!isPaused}
-            glow={!isPaused}
-          />
-          {isPaused ? "Paused" : "Now playing"}
+          {isPaused ? `${ownerName} paused` : `${ownerName} is playing`}
         </div>
         <p className={styles.title}>{metadata?.title ?? item.trackId}</p>
         <p className={styles.artist}>{metadata?.artist ?? " "}</p>
         <TrackProgress progress={progress} onSeek={onSeek} />
-        <p className={styles.addedBy}>from {ownerName}</p>
       </div>
       <div className={styles.controls}>
         <IconButton
           shape="circle"
           size="md"
           tone="neutral"
+          className={styles.playButton}
           onClick={onTogglePause}
           label={isPaused ? "Resume" : "Pause"}
         >
           {isPaused ? "▶" : "❚❚"}
         </IconButton>
-        <IconButton shape="circle" size="md" tone="neutral" onClick={onSkip} label="Skip">
+        <IconButton
+          shape="circle"
+          size="md"
+          tone="neutral"
+          className={styles.skipButton}
+          onClick={onSkip}
+          label="Skip"
+        >
           ⏭
         </IconButton>
       </div>

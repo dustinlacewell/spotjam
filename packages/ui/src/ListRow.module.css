@@ -39,23 +39,15 @@
   -webkit-appearance: none;
 }
 
-/* --- selection styles --- */
+/* --- selection --- */
 
-.subtle {
-  background: var(--bg-card-hover);
-  color: var(--text);
-}
-
-.fill,
-.fill:hover {
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 600;
-}
-
-.outline,
-.outline:hover {
+/* Tripled, and repeated again over :hover, so this always outranks any
+   consumer override on the border — a hover shade, anything a consumer
+   stylesheet adds at up to double-class specificity. Background and text
+   color are left alone: selection reads by its outline only, so each
+   consumer's resting or hover background (a card fill, a raised sidebar,
+   etc.) still shows. */
+.selected.selected.selected,
+.selected.selected.selected:hover {
   border-color: var(--accent);
-  background: var(--bg-card);
-  color: var(--text);
 }

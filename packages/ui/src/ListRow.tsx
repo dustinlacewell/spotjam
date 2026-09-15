@@ -1,19 +1,11 @@
 import type { CSSProperties, MouseEventHandler, ReactNode } from "react";
 import styles from "./ListRow.module.css";
 
-export type ListRowSelectionStyle = "subtle" | "fill" | "outline";
 export type ListRowLayout = "flex" | "grid";
-
-const selectionClass: Record<ListRowSelectionStyle, string> = {
-  subtle: styles.subtle,
-  fill: styles.fill,
-  outline: styles.outline,
-};
 
 function classes(
   layout: ListRowLayout,
   selected: boolean,
-  selectionStyle: ListRowSelectionStyle,
   isButton: boolean,
   className: string | undefined,
 ): string {
@@ -21,7 +13,7 @@ function classes(
     styles.base,
     layout === "grid" ? styles.grid : undefined,
     isButton ? styles.button : undefined,
-    selected ? selectionClass[selectionStyle] : undefined,
+    selected ? styles.selected : undefined,
     className,
   ]
     .filter(Boolean)
@@ -32,7 +24,6 @@ export interface ListRowProps {
   children: ReactNode;
   as?: "button" | "div";
   selected?: boolean;
-  selectionStyle?: ListRowSelectionStyle;
   layout?: ListRowLayout;
   /** Only meaningful when layout="grid". */
   gridTemplate?: string;
@@ -41,11 +32,13 @@ export interface ListRowProps {
   onDoubleClick?: MouseEventHandler<HTMLElement>;
 }
 
+/** The one selected-row look for every list in the app: accent-colored text,
+ *  no fill. Do not add a second selection style — pick this one so every
+ *  list reads the same way. */
 export function ListRow({
   children,
   as = "div",
   selected = false,
-  selectionStyle = "subtle",
   layout = "flex",
   gridTemplate,
   className,
@@ -53,13 +46,7 @@ export function ListRow({
   onDoubleClick,
 }: ListRowProps) {
   const isButton = as === "button";
-  const resolved = classes(
-    layout,
-    selected,
-    selectionStyle,
-    isButton,
-    className,
-  );
+  const resolved = classes(layout, selected, isButton, className);
   const style: CSSProperties | undefined =
     layout === "grid" && gridTemplate !== undefined
       ? { gridTemplateColumns: gridTemplate }
