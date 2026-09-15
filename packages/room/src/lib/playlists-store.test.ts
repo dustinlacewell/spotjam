@@ -25,11 +25,14 @@ afterEach(() => {
   Reflect.deleteProperty(globalThis, "localStorage");
 });
 
+const LOCAL = { kind: "local" } as const;
+const LINK = { kind: "spotify", playlistId: "pppp1111", syncedAt: 1000 } as const;
+
 describe("loadPlaylists", () => {
   it("loads a playlist stored before sharing existed as private", () => {
     localStorage.setItem(KEY, JSON.stringify([{ id: "one", name: "Morning", tracks: [TRACK] }]));
     expect(loadPlaylists()).toEqual([
-      { id: "one", name: "Morning", tracks: [TRACK], isPublic: false },
+      { id: "one", name: "Morning", tracks: [TRACK], isPublic: false, source: LOCAL },
     ]);
   });
 
@@ -50,12 +53,66 @@ describe("loadPlaylists", () => {
   });
 
   it("round-trips through savePlaylists", () => {
-    const lists = [{ id: "one", name: "Morning", tracks: [TRACK], isPublic: true }];
+    const lists = [
+      { id: "one", name: "Morning", tracks: [TRACK], isPublic: true, source: LOCAL },
+    ];
     savePlaylists(lists);
     expect(loadPlaylists()).toEqual(lists);
   });
 
   it("is empty when nothing is stored", () => {
     expect(loadPlaylists()).toEqual([]);
+  });
+});
+
+describe("loadPlaylists and the playlist source", () => {
+  it("loads a playlist stored before linking existed as local", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([{ id: "one", name: "Morning", tracks: [], isPublic: false }]),
+    );
+    expect(loadPlaylists()[0].source).toEqual(LOCAL);
+  });
+
+  it("keeps a stored link", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([{ id: "one", name: "Morning", tracks: [], isPublic: false, source: LINK }]),
+    );
+    expect(loadPlaylists()[0].source).toEqual(LINK);
+  });
+
+  it("round-trips a linked playlist", () => {
+    const lists = [
+      { id: "one", name: "From Spotify", tracks: [TRACK], isPublic: false, source: LINK },
+    ];
+    savePlaylists(lists);
+    expect(loadPlaylists()).toEqual(lists);
+  });
+
+  /**
+   * A half-written source must not produce a playlist that claims to mirror a
+   * playlist id it does not have — that playlist would be syncable, and a sync
+   * can drop it.
+   */
+  it("degrades a malformed source to local", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([
+        { id: "a", name: "No id", tracks: [], isPublic: false, source: { kind: "spotify" } },
+        {
+          id: "b",
+          name: "Empty id",
+          tracks: [],
+          isPublic: false,
+          source: { kind: "spotify", playlistId: "" },
+        },
+        { id: "c", name: "Nonsense", tracks: [], isPublic: false, source: "spotify" },
+        { id: "d", name: "Null", tracks: [], isPublic: false, source: null },
+      ]),
+    );
+    for (const list of loadPlaylists()) {
+      expect(list.source).toEqual(LOCAL);
+    }
   });
 });

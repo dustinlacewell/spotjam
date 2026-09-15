@@ -41,7 +41,8 @@ export function QueueView({
 }) {
   const { status, participants, sessionQueue, pointer, myProgress, myQueue, queueOf, error } =
     useRoomSnapshot(room);
-  const playlistsApi = usePlaylists();
+  const { playlistImporter } = useRoomServices();
+  const playlistsApi = usePlaylists(playlistImporter);
   const [selection, setSelection] = useState<Selection>("session");
   const [pane, setPane] = useState<PaneSelection>(QUEUE_PANE);
   const now = useNowTicker(pointer.itemId !== null);
@@ -52,12 +53,19 @@ export function QueueView({
   const { importStatus, startImports } = usePlaylistImport();
 
   // A playlist link dropped on the playlist list, or on another playlist's
-  // pane, has one sane meaning: it becomes a new local playlist, which then
-  // takes over the view.
+  // pane, has one sane meaning: it becomes a new playlist, which then takes
+  // over the view.
+  //
+  // It stays linked to the Spotify playlist it came from: Spotify keeps
+  // owning the content, and syncing pulls later changes in.
   const importAsNewPlaylist = useCallback(
     (playlists: ParsedPlaylist[]) => {
       startImports(playlists, (imported) => {
-        const id = createWithTracks(imported.name, imported.tracks);
+        const id = createWithTracks(imported.name, imported.tracks, {
+          kind: "spotify",
+          playlistId: imported.playlistId,
+          syncedAt: Date.now(),
+        });
         setSelection(myPubkey);
         setPane(id);
       });

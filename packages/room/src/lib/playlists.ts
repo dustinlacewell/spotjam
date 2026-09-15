@@ -2,12 +2,45 @@ import { appendUniqueTracks, type SharedPlaylist } from "@spotjam/protocol";
 import type { ParsedTrack } from "./spotify-link";
 import { shuffled } from "./shuffle";
 
+/**
+ * Where a playlist's content comes from.
+ *
+ * A local playlist is yours: you add, remove and reorder its tracks. A linked
+ * one mirrors a Spotify playlist — Spotify owns the content, spotjam only
+ * reads it, and a sync replaces name and tracks wholesale.
+ *
+ * This is install-local state. `toSharedPlaylists` projects it away, so a peer
+ * sees a linked playlist as an ordinary one.
+ */
+export type PlaylistSource =
+  | { kind: "local" }
+  | { kind: "spotify"; playlistId: string; syncedAt: number };
+
 export interface Playlist {
   id: string;
   name: string;
   tracks: ParsedTrack[];
   /** Public playlists are visible to everyone else in the room. */
   isPublic: boolean;
+  source: PlaylistSource;
+}
+
+const LOCAL: PlaylistSource = { kind: "local" };
+
+/**
+ * Whether this install may change a playlist's name, tracks or order.
+ *
+ * False for a linked playlist: Spotify is the authority, and an edit here
+ * would only survive until the next sync. Adding its tracks to a queue is
+ * still fine — that copies out, it does not mutate the playlist.
+ */
+export function isEditable(playlist: Playlist): boolean {
+  return playlist.source.kind === "local";
+}
+
+/** The Spotify playlist id a linked playlist mirrors, or null when local. */
+export function linkedPlaylistId(playlist: Playlist): string | null {
+  return playlist.source.kind === "spotify" ? playlist.source.playlistId : null;
 }
 
 /**
@@ -24,6 +57,7 @@ export function createPlaylist(lists: Playlist[], name: string, id?: string): Pl
       name: trimmed || "Untitled",
       tracks: [],
       isPublic: false,
+      source: LOCAL,
     },
   ];
 }
@@ -39,10 +73,53 @@ export function createPlaylistWithTracks(
   name: string,
   tracks: ParsedTrack[],
   id?: string,
+  source: PlaylistSource = LOCAL,
 ): Playlist[] {
   const created = createPlaylist(lists, name, id);
   const fresh = created[created.length - 1];
-  return [...created.slice(0, -1), { ...fresh, tracks: [...appendUniqueTracks([], tracks)] }];
+  return [
+    ...created.slice(0, -1),
+    { ...fresh, tracks: [...appendUniqueTracks([], tracks)], source },
+  ];
+}
+
+/**
+ * Replaces a linked playlist's name and tracks with what Spotify just handed
+ * back, and stamps the sync time.
+ *
+ * Wholesale replacement is the point: Spotify owns the content, so a track
+ * dropped there is dropped here, and the order is theirs. Local playlists and
+ * unknown ids are left alone, which is what makes a stale sync landing after
+ * an unlink harmless.
+ */
+export function reconcileLinked(
+  lists: Playlist[],
+  id: string,
+  fetched: { name: string; tracks: ParsedTrack[] },
+  syncedAt: number,
+): Playlist[] {
+  return mapList(lists, id, (list) => {
+    if (list.source.kind !== "spotify") return list;
+    const name = fetched.name.trim() || list.name;
+    return {
+      ...list,
+      name,
+      tracks: [...appendUniqueTracks([], fetched.tracks)],
+      source: { ...list.source, syncedAt },
+    };
+  });
+}
+
+/**
+ * Cuts a playlist's tie to Spotify, keeping the tracks it holds right now.
+ *
+ * What is left is an ordinary local playlist: editable, and never synced
+ * again.
+ */
+export function unlinkPlaylist(lists: Playlist[], id: string): Playlist[] {
+  return mapList(lists, id, (list) =>
+    list.source.kind === "local" ? list : { ...list, source: LOCAL },
+  );
 }
 
 /** The name a new playlist gets: "Untitled", then "Untitled 2", "Untitled 3", ... */

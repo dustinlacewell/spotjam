@@ -9,7 +9,12 @@ export type { MockParticipant, MockPlaying, MockRoomSeed } from "./mock/mock-roo
 
 export type { TrackInfo, TrackMetadataSource } from "./ports/track-metadata";
 
-export type { ImportedPlaylist, PlaylistImporter } from "./ports/playlist-importer";
+export { PlaylistFetchError, isGone } from "./ports/playlist-importer";
+export type {
+  ImportedPlaylist,
+  PlaylistFetchFailure,
+  PlaylistImporter,
+} from "./ports/playlist-importer";
 
 // Room client core — pure op building and snapshot folding.
 
@@ -67,13 +72,17 @@ export {
   createPlaylistWithTracks,
   deletePlaylist,
   insertTracksIntoPlaylist,
+  isEditable,
+  linkedPlaylistId,
+  reconcileLinked,
   removeTrackFromPlaylist,
   renamePlaylist,
   setPlaylistPublic,
   shufflePlaylist,
   toSharedPlaylists,
+  unlinkPlaylist,
 } from "./lib/playlists";
-export type { Playlist } from "./lib/playlists";
+export type { Playlist, PlaylistSource } from "./lib/playlists";
 
 // The local copy of a member's queue, so a server restart does not lose it.
 

@@ -1,9 +1,10 @@
 import { Fragment, useRef, useState } from "react";
-import { ListPlus, ListStart, Shuffle } from "lucide-react";
-import { HintLine, IconButton, TextField } from "@spotjam/ui";
+import { ListPlus, ListStart, RefreshCw, Shuffle, Unlink } from "lucide-react";
+import { Button, HintLine, IconButton, TextField } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
 import type { ParsedLinks, ParsedTrack } from "../lib/spotify-link";
 import type { Playlist } from "../lib/playlists";
+import type { SyncState } from "./use-playlists";
 import { parseSpotifyLinks } from "../lib/spotify-link";
 import { carriesTracks, linksFromDrop } from "../lib/drop-links";
 import { tracksOf } from "../lib/selection";
@@ -21,6 +22,10 @@ import listStyles from "./QueueLists.module.css";
 export function PlaylistTracks({
   playlist,
   readOnly,
+  linked = false,
+  syncState = "idle",
+  onSync,
+  onUnlink,
   onLinks,
   onRemoveTrack,
   onAddToQueue,
@@ -31,10 +36,22 @@ export function PlaylistTracks({
 }: {
   playlist: Playlist;
   /**
-   * Someone else's playlist: it can be played, never edited. Only the owner
-   * changes its tracks, its order, or whether the room can see it.
+   * The playlist cannot be edited here: someone else's, or one Spotify owns.
+   * It can still be played — queueing copies tracks out rather than changing
+   * the playlist.
    */
   readOnly: boolean;
+  /**
+   * Ours, but mirroring a Spotify playlist. Read-only like a peer's, and
+   * additionally syncable and unlinkable.
+   */
+  linked?: boolean;
+  /** How this linked playlist's last sync ended. */
+  syncState?: SyncState;
+  /** Pulls the Spotify playlist's content again. */
+  onSync?: () => void;
+  /** Cuts the tie to Spotify, keeping the tracks. */
+  onUnlink?: () => void;
   /**
    * Tracks join this playlist at `beforeTrackId` (or the end, when null);
    * playlist links import as new playlists regardless of drop position.
@@ -81,11 +98,23 @@ export function PlaylistTracks({
     if (links.tracks.length > 0 || links.playlists.length > 0) onLinks(links, beforeTrackId);
   }
 
-  const body = isEmpty ? (
+  // A linked playlist we could not reach says so in place of its tracks: an
+  // empty list would read as "Spotify emptied this playlist", which is the one
+  // thing we do not know.
+  const body = linked && syncState === "unreachable" ? (
+    <div className={styles.empty}>
+      <p>Can't connect to Spotify.</p>
+      <Button variant="secondary" size="sm" onClick={onSync}>
+        Sync
+      </Button>
+    </div>
+  ) : isEmpty ? (
     <p className={styles.empty}>
-      {readOnly
-        ? "This playlist has no tracks."
-        : "No tracks yet. Paste a link below or drop tracks here."}
+      {linked
+        ? "This Spotify playlist has no tracks."
+        : readOnly
+          ? "This playlist has no tracks."
+          : "No tracks yet. Paste a link below or drop tracks here."}
     </p>
   ) : visibleTracks.length === 0 ? (
     <p className={styles.empty}>No tracks match "{query}".</p>
@@ -137,12 +166,42 @@ export function PlaylistTracks({
           />
         )}
         <div className={styles.tracksActions}>
+          {/* Sharing is ours to decide even when Spotify owns the content. */}
+          {linked && (
+            <>
+              <PublicToggle
+                isPublic={playlist.isPublic}
+                onToggle={() => onSetPublic(!playlist.isPublic)}
+              />
+              <IconButton
+                label="Sync from Spotify"
+                shape="square"
+                size="md"
+                tone="neutral"
+                disabled={syncState === "syncing"}
+                onClick={onSync}
+              >
+                <RefreshCw size={16} strokeWidth={2} />
+              </IconButton>
+              <IconButton
+                label="Unlink from Spotify"
+                shape="square"
+                size="md"
+                tone="neutral"
+                onClick={onUnlink}
+              >
+                <Unlink size={16} strokeWidth={2} />
+              </IconButton>
+            </>
+          )}
           {!readOnly && (
             <>
               <PublicToggle
                 isPublic={playlist.isPublic}
                 onToggle={() => onSetPublic(!playlist.isPublic)}
               />
+              {/* Shuffle rewrites the stored order, which a sync would throw
+                  away — so a linked playlist does not offer it. */}
               <IconButton
                 label="Shuffle"
                 shape="square"

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, IconButton, ListRow, TextField } from "@spotjam/ui";
-import type { Playlist } from "../lib/playlists";
+import { isEditable, type Playlist } from "../lib/playlists";
 import type { ParsedPlaylist } from "../lib/spotify-link";
 import { TrackDropZone } from "./TrackDropZone";
 import { QUEUE_PANE, type PaneSelection } from "./pane-selection";
@@ -69,7 +69,7 @@ export function PlaylistList({
                 className={styles.row}
                 selected={playlist.id === selected}
                 onClick={() => onSelect(playlist.id)}
-                onDoubleClick={() => !readOnly && onStartRename(playlist.id)}
+                onDoubleClick={() => isEditable(playlist) && !readOnly && onStartRename(playlist.id)}
               >
                 <span className={styles.rowName}>{playlist.name}</span>
                 <span className={styles.rowCount}>{playlist.tracks.length}</span>

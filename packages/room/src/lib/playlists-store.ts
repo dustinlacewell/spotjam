@@ -1,4 +1,4 @@
-import type { Playlist } from "./playlists";
+import type { Playlist, PlaylistSource } from "./playlists";
 
 const STORAGE_KEY = "spotjam.playlists";
 
@@ -13,7 +13,7 @@ export function loadPlaylists(): Playlist[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isPlaylist).map(withPublicFlag);
+    return parsed.filter(isPlaylist).map(withPublicFlag).map(withSource);
   } catch {
     return [];
   }
@@ -42,4 +42,22 @@ function isPlaylist(value: unknown): value is Playlist {
  */
 function withPublicFlag(list: Playlist): Playlist {
   return list.isPublic === true ? list : { ...list, isPublic: false };
+}
+
+/**
+ * Playlists stored before linking existed carry no source. They load local,
+ * which is what they are: spotjam owns their content.
+ *
+ * A stored source is only honoured when it is a well-formed link. Anything
+ * else — a half-written object, a hand-edited store — degrades to local rather
+ * than producing a playlist that claims to mirror a playlist id it does not
+ * have, which would then be syncable and auto-droppable.
+ */
+function withSource(list: Playlist): Playlist {
+  return isLinkedSource(list.source) ? list : { ...list, source: { kind: "local" } };
+}
+
+function isLinkedSource(source: PlaylistSource | undefined): boolean {
+  if (source?.kind !== "spotify") return false;
+  return typeof source.playlistId === "string" && source.playlistId.length > 0;
 }

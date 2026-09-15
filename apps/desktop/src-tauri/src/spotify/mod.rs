@@ -6,7 +6,7 @@ mod registry;
 mod track_api;
 
 pub use player_api::PlayerState;
-pub use playlist_api::PlaylistContents;
+pub use playlist_api::{PlaylistContents, PlaylistError};
 pub use track_api::TrackMetadata;
 
 use cdp::CdpClient;
@@ -51,6 +51,43 @@ impl SpotifyBridge {
                 Err(e.to_string())
             }
         }
+    }
+
+    /// Like `with_client`, for a call that reports its own typed failure.
+    ///
+    /// `with_client` flattens every error to a string, which is exactly what a
+    /// playlist fetch must not do: "this playlist is gone" and "Spotify is not
+    /// answering" drive opposite actions. Getting to the client can itself
+    /// fail, and that is always unreachable — no answer means no verdict about
+    /// the playlist.
+    ///
+    /// The stale connection is dropped only on an unreachable failure. A
+    /// `Gone` answer means the client talked to us, so the connection is fine.
+    async fn with_client_typed<T>(
+        &self,
+        f: impl for<'a> FnOnce(
+            &'a CdpClient,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<T, PlaylistError>> + Send + 'a>,
+        >,
+    ) -> Result<T, PlaylistError> {
+        let mut guard = self.client.lock().await;
+        if guard.is_none() {
+            let ws_url = launcher::ensure_running_and_get_page_ws_url()
+                .await
+                .map_err(PlaylistError::unreachable_from)?;
+            let client = CdpClient::connect(&ws_url)
+                .await
+                .map_err(PlaylistError::unreachable_from)?;
+            *guard = Some(client);
+        }
+
+        let client = guard.as_ref().unwrap();
+        let result = f(client).await;
+        if matches!(result, Err(PlaylistError::Unreachable { .. })) {
+            *guard = None;
+        }
+        result
     }
 }
 
@@ -134,13 +171,17 @@ pub async fn spotify_get_queue(
 
 /// Returns a playlist's name and every `spotify:track:` entry it holds.
 /// Accepts either a `spotify:playlist:ID` URI or an open.spotify.com URL.
+///
+/// Failures come back typed rather than as a string: the caller has to tell a
+/// playlist that no longer exists from a client it could not reach, because
+/// only the first may drop a linked playlist.
 #[tauri::command]
 pub async fn spotify_fetch_playlist(
     bridge: tauri::State<'_, SpotifyBridge>,
     uri: String,
-) -> Result<PlaylistContents, String> {
+) -> Result<PlaylistContents, PlaylistError> {
     bridge
-        .with_client(|client| Box::pin(playlist_api::fetch_playlist(client, uri)))
+        .with_client_typed(|client| Box::pin(playlist_api::fetch_playlist(client, uri)))
         .await
 }
 
