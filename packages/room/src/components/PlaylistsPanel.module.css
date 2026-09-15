@@ -1,9 +1,11 @@
+/* Tight on the left: the playlist list is the page's own edge, and a wide
+   gutter there just pushed it away from nothing. */
 .panel {
   flex: 1;
   min-height: 0;
   display: flex;
   gap: var(--space-4);
-  padding: var(--space-4) var(--space-6);
+  padding: var(--space-4) var(--space-6) var(--space-4) var(--space-3);
 }
 
 /* ---- left column: the queue, then the playlists ---- */
@@ -77,11 +79,11 @@
   width: 24px;
 }
 
-/* The two ways to make a playlist, pinned under the list. */
+/* The two ways to make a playlist, pinned under the list. Stretched, like
+   the lone New playlist button was before it had company. */
 .listActions {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: var(--space-1);
   flex-shrink: 0;
 }
