@@ -1,57 +1,15 @@
 use super::cdp::CdpClient;
+use super::registry::ensure_script;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::LazyLock;
 
-/// Resolves the internal `PlayerAPI` service through the React fiber tree's
-/// RegistryContext and stashes it on `window.__playerApi` for reuse across
-/// calls. Idempotent: safe to evaluate repeatedly, e.g. after a page reload
-/// invalidates the stash.
-///
-/// xpui registers services under `Symbol.for(name)` keys, so the key is
-/// built here directly. Reading it out of a webpack module by numeric id
-/// broke every time a Spotify update renumbered the bundle.
-const ENSURE_PLAYER_API_JS: &str = r#"(() => {
-  if (window.__playerApi) return true;
-  const playerApiKey = Symbol.for("PlayerAPI");
-
-  const all = document.querySelectorAll("*");
-  let fiberRoot = null;
-  for (const el of all) {
-    const k = Object.keys(el).find((k) => k.startsWith("__reactFiber"));
-    if (k) { fiberRoot = el[k]; break; }
-  }
-  if (!fiberRoot) throw new Error("no React fiber found");
-
-  let registry = null;
-  const seen = new Set();
-  const queue = [fiberRoot];
-  let visited = 0;
-  while (queue.length && visited < 20000) {
-    const f = queue.shift();
-    if (!f || seen.has(f)) continue;
-    seen.add(f);
-    visited++;
-    const deps = f.dependencies;
-    if (deps && deps.firstContext) {
-      let ctx = deps.firstContext;
-      while (ctx) {
-        const val = ctx.memoizedValue;
-        if (val && typeof val.resolve === "function") { registry = val; break; }
-        ctx = ctx.next;
-      }
-    }
-    if (registry) break;
-    if (f.child) queue.push(f.child);
-    if (f.sibling) queue.push(f.sibling);
-  }
-  if (!registry) throw new Error("no RegistryContext found in fiber tree");
-
-  const playerApi = registry.resolve(playerApiKey);
-  if (!playerApi) throw new Error("registry.resolve(PlayerAPI) returned falsy");
-  window.__playerApi = playerApi;
-  return true;
-})()"#;
+/// Stashes the internal `PlayerAPI` service on `window.__playerApi` for
+/// reuse across calls. Idempotent: safe to evaluate repeatedly, e.g. after
+/// a page reload invalidates the stash.
+static ENSURE_PLAYER_API_JS: LazyLock<String> =
+    LazyLock::new(|| ensure_script("__playerApi", r#"resolveService("PlayerAPI")"#));
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,7 +22,7 @@ pub struct PlayerState {
 }
 
 async fn ensure_player_api(cdp: &CdpClient) -> Result<()> {
-    cdp.evaluate(ENSURE_PLAYER_API_JS).await?;
+    cdp.evaluate(&ENSURE_PLAYER_API_JS).await?;
     Ok(())
 }
 

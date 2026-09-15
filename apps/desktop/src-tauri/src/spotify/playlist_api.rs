@@ -1,62 +1,27 @@
 use super::cdp::CdpClient;
+use super::registry::ensure_script;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::LazyLock;
 
-/// Resolves Spotify's internal playlist service the same way `player_api`
-/// resolves `PlayerAPI`: build the `Symbol.for(name)` registry key, then look
-/// it up in the React RegistryContext.
+/// Stashes Spotify's internal playlist service on `window.__playlistApi`.
 ///
 /// The registry no longer registers a bare `PlaylistAPI`; it registers
 /// `ListPlatformAPI`, which holds the classic playlist client on its
 /// `_playlistAPI` field. That inner object is what exposes
-/// `getPlaylist(uri)`, so it is what gets stashed.
-///
-/// Stashed on `window.__playlistApi` for reuse. Idempotent: safe to evaluate
-/// repeatedly, e.g. after a page reload invalidates the stash.
-const ENSURE_PLAYLIST_API_JS: &str = r#"(() => {
-  if (window.__playlistApi) return true;
-  const listPlatformKey = Symbol.for("ListPlatformAPI");
-
-  const all = document.querySelectorAll("*");
-  let fiberRoot = null;
-  for (const el of all) {
-    const k = Object.keys(el).find((k) => k.startsWith("__reactFiber"));
-    if (k) { fiberRoot = el[k]; break; }
-  }
-  if (!fiberRoot) throw new Error("no React fiber found");
-
-  let registry = null;
-  const seen = new Set();
-  const queue = [fiberRoot];
-  let visited = 0;
-  while (queue.length && visited < 20000) {
-    const f = queue.shift();
-    if (!f || seen.has(f)) continue;
-    seen.add(f);
-    visited++;
-    const deps = f.dependencies;
-    if (deps && deps.firstContext) {
-      let ctx = deps.firstContext;
-      while (ctx) {
-        const val = ctx.memoizedValue;
-        if (val && typeof val.resolve === "function") { registry = val; break; }
-        ctx = ctx.next;
-      }
-    }
-    if (registry) break;
-    if (f.child) queue.push(f.child);
-    if (f.sibling) queue.push(f.sibling);
-  }
-  if (!registry) throw new Error("no RegistryContext found in fiber tree");
-
-  const listPlatform = registry.resolve(listPlatformKey);
-  if (!listPlatform) throw new Error("registry.resolve(ListPlatformAPI) returned falsy");
-  const playlistApi = listPlatform._playlistAPI;
-  if (!playlistApi) throw new Error("ListPlatformAPI has no _playlistAPI");
-  window.__playlistApi = playlistApi;
-  return true;
-})()"#;
+/// `getPlaylist(uri)`, so it is what gets stashed. Idempotent: safe to
+/// evaluate repeatedly, e.g. after a page reload invalidates the stash.
+static ENSURE_PLAYLIST_API_JS: LazyLock<String> = LazyLock::new(|| {
+    ensure_script(
+        "__playlistApi",
+        r#"(() => {
+    const api = resolveService("ListPlatformAPI")._playlistAPI;
+    if (!api) throw new Error("ListPlatformAPI has no _playlistAPI");
+    return api;
+  })()"#,
+    )
+});
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,7 +39,7 @@ pub struct PlaylistTrack {
 }
 
 async fn ensure_playlist_api(cdp: &CdpClient) -> Result<()> {
-    cdp.evaluate(ENSURE_PLAYLIST_API_JS).await?;
+    cdp.evaluate(&ENSURE_PLAYLIST_API_JS).await?;
     Ok(())
 }
 
