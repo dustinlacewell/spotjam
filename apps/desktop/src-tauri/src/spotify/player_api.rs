@@ -3,31 +3,17 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 use serde_json::Value;
 
-/// Reaches into xpui's webpack module graph to resolve the internal
-/// `PlayerAPI` service (module key "PlayerAPI", module id 70968/export H)
-/// via the React fiber tree's RegistryContext, and stashes it on
-/// `window.__playerApi` for reuse across calls. Idempotent: safe to
-/// evaluate repeatedly, e.g. after a page reload invalidates the stash.
+/// Resolves the internal `PlayerAPI` service through the React fiber tree's
+/// RegistryContext and stashes it on `window.__playerApi` for reuse across
+/// calls. Idempotent: safe to evaluate repeatedly, e.g. after a page reload
+/// invalidates the stash.
+///
+/// xpui registers services under `Symbol.for(name)` keys, so the key is
+/// built here directly. Reading it out of a webpack module by numeric id
+/// broke every time a Spotify update renumbered the bundle.
 const ENSURE_PLAYER_API_JS: &str = r#"(() => {
   if (window.__playerApi) return true;
-  const modules = window.__webpack_modules__;
-  const cache = {};
-  function req(id) {
-    id = String(id);
-    if (cache[id]) return cache[id].exports;
-    const mod = { exports: {} };
-    cache[id] = mod;
-    const factory = modules[id];
-    if (!factory) throw new Error("no module " + id);
-    factory(mod, mod.exports, req);
-    return mod.exports;
-  }
-  req.d = (target, defs) => {
-    for (const k in defs) {
-      Object.defineProperty(target, k, { get: defs[k], enumerable: true });
-    }
-  };
-  const playerApiKey = req("70968").H;
+  const playerApiKey = Symbol.for("PlayerAPI");
 
   const all = document.querySelectorAll("*");
   let fiberRoot = null;

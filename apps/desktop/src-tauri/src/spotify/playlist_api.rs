@@ -4,36 +4,19 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Resolves Spotify's internal playlist service the same way `player_api`
-/// resolves `PlayerAPI`: build a mini webpack `require`, read the service key
-/// out of its key module, then look it up in the React RegistryContext.
+/// resolves `PlayerAPI`: build the `Symbol.for(name)` registry key, then look
+/// it up in the React RegistryContext.
 ///
 /// The registry no longer registers a bare `PlaylistAPI`; it registers
-/// `ListPlatformAPI` (module id 84020, export `n`), which holds the classic
-/// playlist client on its `_playlistAPI` field. That inner object is what
-/// exposes `getPlaylist(uri)`, so it is what gets stashed.
+/// `ListPlatformAPI`, which holds the classic playlist client on its
+/// `_playlistAPI` field. That inner object is what exposes
+/// `getPlaylist(uri)`, so it is what gets stashed.
 ///
 /// Stashed on `window.__playlistApi` for reuse. Idempotent: safe to evaluate
 /// repeatedly, e.g. after a page reload invalidates the stash.
 const ENSURE_PLAYLIST_API_JS: &str = r#"(() => {
   if (window.__playlistApi) return true;
-  const modules = window.__webpack_modules__;
-  const cache = {};
-  function req(id) {
-    id = String(id);
-    if (cache[id]) return cache[id].exports;
-    const mod = { exports: {} };
-    cache[id] = mod;
-    const factory = modules[id];
-    if (!factory) throw new Error("no module " + id);
-    factory(mod, mod.exports, req);
-    return mod.exports;
-  }
-  req.d = (target, defs) => {
-    for (const k in defs) {
-      Object.defineProperty(target, k, { get: defs[k], enumerable: true });
-    }
-  };
-  const listPlatformKey = req("84020").n;
+  const listPlatformKey = Symbol.for("ListPlatformAPI");
 
   const all = document.querySelectorAll("*");
   let fiberRoot = null;
