@@ -42,6 +42,7 @@ function Screens() {
   const [prefs] = useState(loadSessionPrefs);
   const [session, setSession] = useState<Session | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
+  const [driver, setDriver] = useState<SyncDriver | null>(null);
   const [identity, setIdentity] = useState<IdentityState>({ status: "loading" });
   const [preSessionView, setPreSessionView] = useState<PreSessionView>("join");
 
@@ -84,13 +85,15 @@ function Screens() {
   useEffect(() => {
     if (!session || connection === null) return;
     const newRoom = new Room(connection, session.roomId);
-    const driver = new SyncDriver(newRoom);
-    driver.start();
+    const newDriver = new SyncDriver(newRoom);
+    newDriver.start();
     setRoom(newRoom);
+    setDriver(newDriver);
     return () => {
-      driver.stop();
+      newDriver.stop();
       newRoom.destroy();
       setRoom(null);
+      setDriver(null);
     };
   }, [session, connection]);
 
@@ -136,6 +139,13 @@ function Screens() {
       />
     );
   }
-  if (!room) return null;
-  return <QueueView room={room} roomId={session.roomId} onLeave={handleLeave} />;
+  if (!room || !driver) return null;
+  return (
+    <QueueView
+      room={room}
+      roomId={session.roomId}
+      onSync={() => driver.sync()}
+      onLeave={handleLeave}
+    />
+  );
 }

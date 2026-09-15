@@ -119,6 +119,18 @@ export class SyncDriver {
     }, POLL_INTERVAL_MS);
   }
 
+  /**
+   * Attaches to the local player on the user's say-so, whatever it is doing.
+   * The control decision restarts as if the room were just joined, and the
+   * pointer is applied as a fresh start on its current item.
+   */
+  sync(): void {
+    this.control = null;
+    this.lastAppliedItemId = null;
+    this.lastSetNextUri = undefined;
+    void this.applyPointer().then(() => this.syncNextTrack());
+  }
+
   stop(): void {
     if (this.pollHandle) clearInterval(this.pollHandle);
     this.pollHandle = null;

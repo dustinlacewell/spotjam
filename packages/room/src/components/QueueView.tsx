@@ -29,10 +29,13 @@ import styles from "./QueueView.module.css";
 export function QueueView({
   room,
   roomId,
+  onSync,
   onLeave,
 }: {
   room: Room;
   roomId: string;
+  /** Attaches the local player to the room, whatever it is doing. */
+  onSync: () => void;
   onLeave: () => void;
 }) {
   const { status, participants, sessionQueue, pointer, myProgress, myQueue, queueOf, error } =
@@ -136,6 +139,9 @@ export function QueueView({
             broadcasting={broadcasting}
             onToggle={() => room.setBroadcasting(!broadcasting)}
           />
+          <Button variant="secondary" size="sm" onClick={onSync}>
+            Sync
+          </Button>
           <Button variant="secondary" size="sm" onClick={onLeave}>
             Leave room
           </Button>

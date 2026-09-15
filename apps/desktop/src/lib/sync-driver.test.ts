@@ -840,6 +840,26 @@ describe("the user's own music against the room", () => {
     driver.stop();
   });
 
+  it("sync() takes the player back from a detached user", async () => {
+    const room = makeRoom(playingPointer());
+    // Spotify never lands on the room's track: the user keeps their own music on.
+    const invoke = makeInvoke(() => ownMusic());
+    const driver = startDriver(room, invoke);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(invoke.of("spotify_play_track")).toHaveLength(1);
+
+    // The next polls see the user's track and let go of the player.
+    await pollTimes(2);
+    expect(invoke.of("spotify_play_track")).toHaveLength(1);
+
+    driver.sync();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(invoke.of("spotify_play_track")).toHaveLength(2);
+    expect(invoke.of("spotify_play_track")[1].args).toEqual({ uri: URI });
+    driver.stop();
+  });
+
   it("never skips the room when the user switches to an unrelated track", async () => {
     const room = makeRoom(playingPointer());
     const onTrack: PlayerState = {
