@@ -1,8 +1,8 @@
 // Does this client drive the local Spotify player right now?
 //
-// The sync driver used to assume it always did. That assumption is wrong twice:
-// a user who plays their own track in Spotify should not have the room chase
-// them, and joining a room should not silence music the user already had on.
+// Joining a room attaches to Spotify and plays what the room plays, whatever
+// the player was doing. After that, a user who switches Spotify to their own
+// track takes the player back, and the room stops chasing them.
 //
 // This module is the pure decision. It reads the room's pointer, what Spotify
 // actually plays, and the track pre-queued behind the pointer, and returns one
@@ -42,19 +42,9 @@ export function nextControlState(
   if (pointer.itemId === null) return "idle";
   if (prev === "detached") return reclaimed(local, pointerChanged) ? "following" : "detached";
   if (prev === "following") return stillOnOurTracks(local, pointer, nextUri) ? "following" : "detached";
-  return joinable(local, pointer) ? "following" : "detached";
-}
-
-/**
- * First look at a non-empty pointer, from `null` or out of `idle`. An
- * unreadable player, a paused one, or one already on the pointer's track is
- * ours to drive. A player audibly on some other track belongs to the user.
- */
-function joinable(local: LocalPlayback | null, pointer: PlaybackPointer): boolean {
-  if (local === null) return true;
-  if (local.trackUri === pointer.uri) return true;
-  if (local.trackUri === null) return true;
-  return local.isPaused;
+  // First look at a non-empty pointer, from `null` or out of `idle`: the room
+  // takes the player, whatever it was doing.
+  return "following";
 }
 
 /**

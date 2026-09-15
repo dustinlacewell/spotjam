@@ -800,7 +800,7 @@ describe("joining a room", () => {
   });
 });
 
-describe("the user's own music survives a join", () => {
+describe("the user's own music against the room", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(EPOCH);
@@ -830,14 +830,13 @@ describe("the user's own music survives a join", () => {
     driver.stop();
   });
 
-  it("does not take over a playing room while the user plays their own track", async () => {
+  it("takes over a playing room even while the user plays their own track", async () => {
     const room = makeRoom(playingPointer());
     const invoke = makeInvoke(() => ownMusic());
     const driver = startDriver(room, invoke);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(invoke.of("spotify_play_track")).toHaveLength(0);
-    expect(invoke.of("spotify_pause")).toHaveLength(0);
+    expect(invoke.of("spotify_play_track")).toHaveLength(1);
     driver.stop();
   });
 

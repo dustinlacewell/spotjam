@@ -47,9 +47,9 @@ describe("nextControlState", () => {
       expect(nextControlState(null, playing(ROOM.uri), ROOM, NEXT, false)).toBe("following");
     });
 
-    it("detaches when the user plays an unrelated track", () => {
+    it("follows even when the user is playing an unrelated track", () => {
       expect(nextControlState(null, playing("spotify:track:mine"), ROOM, NEXT, false)).toBe(
-        "detached",
+        "following",
       );
     });
 
@@ -69,7 +69,7 @@ describe("nextControlState", () => {
 
     it("treats leaving idle the same as a first evaluation", () => {
       expect(nextControlState("idle", playing("spotify:track:mine"), ROOM, NEXT, true)).toBe(
-        "detached",
+        "following",
       );
       expect(nextControlState("idle", playing(ROOM.uri), ROOM, NEXT, true)).toBe("following");
     });
