@@ -160,11 +160,54 @@ describe("POST /latest.json", () => {
     expect(manifest.platforms).toEqual({ "windows-x86_64": WINDOWS });
   });
 
-  it("rejects anything but GET and POST", async () => {
+  it("rejects anything but GET, POST and OPTIONS", async () => {
     const server = await start();
     const response = await fetch(`http://127.0.0.1:${server.port}/latest.json`, {
       method: "DELETE",
     });
     expect(response.status).toBe(405);
+  });
+});
+
+// The site lives on another origin. Without these headers the browser throws
+// the response away and the page renders as though there were no release.
+describe("cross-origin access", () => {
+  it("allows any origin to read the manifest", async () => {
+    const server = await start();
+    await post(server.port, { version: "0.2.0", platforms: { "windows-x86_64": WINDOWS } });
+
+    const response = await get(server.port);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("sends the header even when there is no release yet", async () => {
+    const server = await start();
+    const response = await get(server.port);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("answers a preflight", async () => {
+    const server = await start();
+    const response = await fetch(`http://127.0.0.1:${server.port}/latest.json`, {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://spotjam.ldlework.com",
+        "access-control-request-method": "GET",
+      },
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-methods")).toContain("GET");
+  });
+
+  it("keeps the header on a refused post", async () => {
+    const server = await start();
+    const response = await post(server.port, { version: "0.2.0", platforms: {} }, null);
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
   });
 });

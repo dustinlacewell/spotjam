@@ -104,6 +104,10 @@ function httpHandler(deps: HttpDeps) {
     }
 
     if (req.url === "/latest.json") {
+      // The site is served from another origin, so without this the browser
+      // discards the response and the page looks like there is no release.
+      res.setHeader("access-control-allow-origin", "*");
+
       if (req.method === "GET") {
         serveManifest(deps, res);
         return;
@@ -112,7 +116,16 @@ function httpHandler(deps: HttpDeps) {
         void receiveManifest(deps, req, res);
         return;
       }
-      res.writeHead(405, { allow: "GET, POST" });
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, {
+          "access-control-allow-methods": "GET, POST, OPTIONS",
+          "access-control-allow-headers": "authorization, content-type",
+          "access-control-max-age": "86400",
+        });
+        res.end();
+        return;
+      }
+      res.writeHead(405, { allow: "GET, POST, OPTIONS" });
       res.end();
       return;
     }
