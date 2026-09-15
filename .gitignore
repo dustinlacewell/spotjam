@@ -16,8 +16,9 @@ dist-ssr
 apps/desktop/src-tauri/target
 apps/desktop/src-tauri/gen
 
-# Deploy secrets (cloudflared tunnel credentials)
+# Deploy secrets (cloudflared tunnel credentials, release POST token)
 apps/server/secrets/
+apps/server/.env
 
 # Local data (SQLite identity store)
 apps/server/data/

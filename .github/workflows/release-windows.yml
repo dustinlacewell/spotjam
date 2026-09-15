@@ -1,0 +1,72 @@
+name: Release (Windows)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and upload to (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-windows-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v1
+        id: tauri
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: spotjam ${{ inputs.tag || github.ref_name }}
+          releaseDraft: false
+          prerelease: false
+
+      # tauri-action has already built latest.json and attached it to the
+      # release. Hand that same document to the server, which merges it per
+      # platform so a re-run of one workflow cannot drop the others.
+      - name: Publish manifest to the update server
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.SPOTJAM_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "${{ inputs.tag || github.ref_name }}" \
+            --pattern latest.json --output latest.json --clobber
+          curl --fail-with-body --silent --show-error \
+            -X POST https://peering.ldlework.com/latest.json \
+            -H "authorization: Bearer $RELEASE_TOKEN" \
+            -H "content-type: application/json" \
+            --data-binary @latest.json

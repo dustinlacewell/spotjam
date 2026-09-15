@@ -5,6 +5,10 @@ services:
       context: ../..
       dockerfile: apps/server/Dockerfile
     restart: unless-stopped
+    environment:
+      # The bearer token the release workflows present to post a manifest.
+      # Unset closes the route rather than opening it to anyone.
+      SPOTJAM_RELEASE_TOKEN: ${SPOTJAM_RELEASE_TOKEN:?set it in apps/server/.env}
     volumes:
       - spotjam-data:/data
 

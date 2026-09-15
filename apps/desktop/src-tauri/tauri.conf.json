@@ -22,9 +22,16 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://peering.ldlework.com/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkzREUwMjMwQ0I1MjEwMTMKUldRVEVGTExNQUxlazBXM3FYZ3JIbm1FT0NCM2lldko2WUNZeXcvbnV4czhLWmtlRWRkVzNFZ3gK"
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

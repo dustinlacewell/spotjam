@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, CenteredCardPage, HintLine, Mark, TextField } from "@spotjam/ui";
 import type { Connection } from "../lib/connection";
 import { useLiveRooms } from "./use-live-rooms";
+import { VersionButton } from "./VersionButton";
 import styles from "./JoinRoom.module.css";
 
 export function JoinRoom({
@@ -58,6 +59,7 @@ export function JoinRoom({
           {rooms.length} public {rooms.length === 1 ? "room" : "rooms"}
         </HintLine>
       </form>
+      <VersionButton />
     </CenteredCardPage>
   );
 }
