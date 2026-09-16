@@ -45,4 +45,7 @@ export type { ContextMenuProps, ContextMenuItemProps } from "./ContextMenu";
 export { Modal } from "./Modal";
 export type { ModalProps } from "./Modal";
 
+export { ConfirmModal } from "./ConfirmModal";
+export type { ConfirmModalProps } from "./ConfirmModal";
+
 export type { Point } from "./context-menu-layout";

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button, IconButton, ListRow, TextField } from "@spotjam/ui";
+import { Link } from "lucide-react";
+import { Button, ListRow, TextField } from "@spotjam/ui";
 import { isEditable, type Playlist } from "../lib/playlists";
 import type { ParsedPlaylist } from "../lib/spotify-link";
 import { TrackDropZone } from "./TrackDropZone";
@@ -17,7 +18,6 @@ export function PlaylistList({
   onStartRename,
   onCommitRename,
   onCancelRename,
-  onDelete,
   onCreate,
   onLinkPlaylist,
   onImportPlaylists,
@@ -35,7 +35,6 @@ export function PlaylistList({
   onStartRename: (id: string) => void;
   onCommitRename: (id: string, name: string) => void;
   onCancelRename: () => void;
-  onDelete: (id: string) => void;
   onCreate: () => void;
   /** Opens the dialog that links a Spotify playlist. */
   onLinkPlaylist: () => void;
@@ -54,7 +53,6 @@ export function PlaylistList({
           >
             <span className={styles.rowName}>{queueLabel}</span>
             <span className={styles.rowCount}>{queueCount}</span>
-            {!readOnly && <span className={styles.actionSpacer} />}
           </ListRow>
         </li>
 
@@ -75,25 +73,17 @@ export function PlaylistList({
                 onDoubleClick={() => isEditable(playlist) && !readOnly && onStartRename(playlist.id)}
               >
                 <span className={styles.rowName}>{playlist.name}</span>
-                <span className={styles.rowCount}>{playlist.rows.length}</span>
-                {!readOnly && (
-                  /* The row itself selects on click; the delete glyph must not. */
-                  <span
-                    className={styles.rowRemove}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <IconButton
-                      label={`Delete ${playlist.name}`}
-                      size="sm"
-                      shape="circle"
-                      tone="danger"
-                      revealOnHover
-                      onClick={() => onDelete(playlist.id)}
-                    >
-                      ✕
-                    </IconButton>
-                  </span>
+                {/* Marks the row as a mirror of a Spotify playlist. A peer's
+                    playlist reaches us as a plain copy, so it never shows one. */}
+                {playlist.source.kind === "spotify" && (
+                  <Link
+                    className={styles.rowLink}
+                    size={12}
+                    strokeWidth={2}
+                    aria-label="Linked to Spotify"
+                  />
                 )}
+                <span className={styles.rowCount}>{playlist.rows.length}</span>
               </ListRow>
             )}
           </li>

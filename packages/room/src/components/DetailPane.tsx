@@ -129,11 +129,6 @@ export function DetailPane({
           setRenamingId(null);
         }}
         onCancelRename={() => setRenamingId(null)}
-        onDelete={(id) => {
-          remove(id);
-          if (id === selected) onSelect(QUEUE_PANE);
-          if (id === renamingId) setRenamingId(null);
-        }}
         onCreate={handleCreate}
         onLinkPlaylist={onLinkPlaylist}
         onImportPlaylists={onImportPlaylists}
@@ -141,12 +136,25 @@ export function DetailPane({
 
       {openPlaylist ? (
         <PlaylistTracks
+          // Each playlist gets its own pane state. Without this, a search
+          // and a half-answered confirmation would carry over to the next
+          // playlist opened, and the confirmation would act on the wrong one.
+          key={openPlaylist.id}
           playlist={openPlaylist}
           canEdit={canEditOpen}
           linked={!readOnly && !isEditable(openPlaylist)}
           syncState={syncStateOf(openPlaylist.id)}
           onSync={() => sync(openPlaylist.id)}
           onUnlink={() => unlink(openPlaylist.id)}
+          onDelete={
+            readOnly
+              ? undefined
+              : () => {
+                  remove(openPlaylist.id);
+                  onSelect(QUEUE_PANE);
+                  if (openPlaylist.id === renamingId) setRenamingId(null);
+                }
+          }
           onLinks={(links, beforeTrackId) =>
             onLinks(links, (tracks) => insertTracks(openPlaylist.id, tracks, beforeTrackId))
           }

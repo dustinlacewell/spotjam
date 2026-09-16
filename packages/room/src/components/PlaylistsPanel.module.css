@@ -41,14 +41,9 @@
 }
 
 /* ListRow supplies the layout, hover and selection fill. The panel adds the
-   resting card background and reveals the row's delete glyph on hover. */
+   resting card background. */
 .row {
   background: var(--bg-card);
-}
-
-.row:hover [data-ui-reveal] {
-  opacity: 1;
-  visibility: visible;
 }
 
 .rowName {
@@ -59,7 +54,8 @@
   white-space: nowrap;
 }
 
-/* currentColor so the count matches the row's own text color, accent or not. */
+/* Last in the row, so every count sits on the right edge. currentColor so it
+   matches the row's own text color, accent or not. */
 .rowCount {
   font-size: 11px;
   color: currentColor;
@@ -67,16 +63,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Swallows the click so deleting never also selects the row. */
-.rowRemove {
-  display: flex;
+/* Sits just left of the count, dimmer than the name it qualifies. */
+.rowLink {
   flex-shrink: 0;
-}
-
-/* Holds the delete button's width on rows that have none, so every count lines up. */
-.actionSpacer {
-  flex-shrink: 0;
-  width: 24px;
+  opacity: 0.6;
 }
 
 /* The two ways to make a playlist, pinned under the list. Stretched, like

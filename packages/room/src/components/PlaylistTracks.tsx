@@ -1,6 +1,6 @@
 import { Fragment, useRef, useState } from "react";
-import { ListPlus, ListStart, RefreshCw, Shuffle, Unlink } from "lucide-react";
-import { Button, HintLine, IconButton, TextField } from "@spotjam/ui";
+import { ListPlus, ListStart, RefreshCw, Shuffle, Trash2, Unlink } from "lucide-react";
+import { Button, ConfirmModal, HintLine, IconButton, TextField } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
 import type { ParsedLinks } from "../lib/spotify-link";
 import type { Playlist, PlaylistRow } from "../lib/playlists";
@@ -26,6 +26,7 @@ export function PlaylistTracks({
   syncState = "idle",
   onSync,
   onUnlink,
+  onDelete,
   onLinks,
   onRemoveTrack,
   onMoveRow,
@@ -55,6 +56,12 @@ export function PlaylistTracks({
   /** Cuts the tie to Spotify, keeping the tracks. */
   onUnlink?: () => void;
   /**
+   * Deletes this playlist from our page. Absent on someone else's, which is
+   * the only place deleting is refused: a linked playlist Spotify will not
+   * let us edit is still ours to drop.
+   */
+  onDelete?: () => void;
+  /**
    * Tracks join this playlist at `beforeTrackId` (or the end, when null);
    * playlist links import as new playlists regardless of drop position.
    */
@@ -71,6 +78,9 @@ export function PlaylistTracks({
   importStatus: string | null;
 }) {
   const [query, setQuery] = useState("");
+  // Which toolbar act is waiting on the user's confirmation, if any. Both
+  // acts throw work away, and neither page can put it back.
+  const [confirming, setConfirming] = useState<"delete" | "unlink" | null>(null);
   // The gap a hovering drag would drop into: an index into visibleRows (drop
   // before that row), visibleRows.length (drop at the end), or null while no
   // drag is over the list.
@@ -238,7 +248,7 @@ export function PlaylistTracks({
                 shape="square"
                 size="md"
                 tone="neutral"
-                onClick={onUnlink}
+                onClick={() => setConfirming("unlink")}
               >
                 <Unlink size={16} strokeWidth={2} />
               </IconButton>
@@ -278,6 +288,17 @@ export function PlaylistTracks({
           >
             <ListStart size={16} strokeWidth={2} />
           </IconButton>
+          {onDelete && (
+            <IconButton
+              label={`Delete ${playlist.name}`}
+              shape="square"
+              size="md"
+              tone="danger"
+              onClick={() => setConfirming("delete")}
+            >
+              <Trash2 size={16} strokeWidth={2} />
+            </IconButton>
+          )}
         </div>
       </div>
 
@@ -325,6 +346,35 @@ export function PlaylistTracks({
       )}
 
       <TrackContextMenu at={menu.at} tracks={menu.tracks} onClose={menu.close} />
+
+      <ConfirmModal
+        open={confirming === "delete"}
+        title={`Delete "${playlist.name}"?`}
+        confirmLabel="Delete"
+        onClose={() => setConfirming(null)}
+        onConfirm={() => {
+          setConfirming(null);
+          onDelete?.();
+        }}
+      >
+        {linked
+          ? "This drops the playlist from your page. The Spotify playlist it mirrors stays where it is."
+          : "This drops the playlist and its tracks. You can't get them back."}
+      </ConfirmModal>
+
+      <ConfirmModal
+        open={confirming === "unlink"}
+        title={`Unlink "${playlist.name}"?`}
+        confirmLabel="Unlink"
+        onClose={() => setConfirming(null)}
+        onConfirm={() => {
+          setConfirming(null);
+          onUnlink?.();
+        }}
+      >
+        This keeps the tracks as an ordinary playlist and stops syncing. Your
+        edits will no longer reach Spotify.
+      </ConfirmModal>
     </div>
   );
 }
