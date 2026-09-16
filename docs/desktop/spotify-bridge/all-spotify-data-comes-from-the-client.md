@@ -7,6 +7,15 @@ control, playlist contents, track titles, artists, cover art: all of it.
 No code path fetches from open.spotify.com, the oembed endpoint, or
 api.spotify.com. Not as a primary source, and not as a fallback.
 
+## Cover art images are the exception
+
+Cover art bytes come from `i.scdn.co`, the content-addressed image CDN,
+because that is where the signed-in client loads every cover on its own
+screen. This is verified and settled — see
+[cover-art-comes-from-the-image-cdn.md](cover-art-comes-from-the-image-cdn.md).
+The rule here is about throttled lookup APIs, and the image CDN is not
+one.
+
 ## Why
 
 - The public endpoints are unauthenticated and rate limited per IP. One

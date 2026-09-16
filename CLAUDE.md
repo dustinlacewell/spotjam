@@ -2,16 +2,16 @@
 
 ## ⚠️ ALL SPOTIFY DATA COMES FROM THE SIGNED-IN CLIENT OVER CDP
 
-**Never fetch Spotify data from an HTTP endpoint. Not open.spotify.com,
-not the oembed endpoint, not api.spotify.com. Not as a primary source,
-not as a fallback.**
+**Never fetch Spotify data from a lookup API. Not open.spotify.com, not
+the oembed endpoint, not api.spotify.com. Not as a primary source, not
+as a fallback.**
 
 Playback state, playback control, playlist contents, track titles,
-artists, cover art: every one of these goes through the local Spotify
+artists, album names: every one of these goes through the local Spotify
 client over the Chrome DevTools Protocol, by calling the service xpui
 itself uses for that data.
 
-**Why:** the public endpoints are rate limited per IP and the Web API is
+**Why:** those endpoints are rate limited per IP and the Web API is
 throttled per token. Both have turned every track on screen into its bare
 id. The client is signed in, holds the data, caches it, and is the source
 its own screen draws from.
@@ -20,6 +20,14 @@ its own screen draws from.
 registry context and call it. Never by webpack module id. When a new kind
 of data is needed, find the xpui service that serves it. Read
 [docs/desktop/spotify-bridge/](docs/desktop/spotify-bridge/) first.
+
+**Cover art images are the one exception, and it is settled.**
+`i.scdn.co/image/<file_id>` is a content-addressed image CDN, and it is
+where the signed-in client itself loads every cover it draws — verified
+by probing the live client's own DOM. It is not a throttled lookup API
+and the rule above does not reach it. Do not "fix" it, and do not go
+looking for an internal image-bytes service; there isn't one. See
+[docs/desktop/spotify-bridge/cover-art-comes-from-the-image-cdn.md](docs/desktop/spotify-bridge/cover-art-comes-from-the-image-cdn.md).
 
 ## Layout
 

@@ -17,8 +17,12 @@ transport. Nothing is fetched from open.spotify.com or the Web API.
    `spotify.metadata.Track`.
 3. The injected script returns those bytes base64-encoded. Rust decodes
    them with prost using the fields the app reads: name, artists, and the
-   album's cover group. An image's `file_id` becomes
-   `https://i.scdn.co/image/<hex>`.
+   album's cover group.
+
+An image's `file_id` becomes `https://i.scdn.co/image/<hex>`, which the
+webview loads from Spotify's image CDN — the same host the client itself
+uses for every cover on its own screen. See
+[cover-art-comes-from-the-image-cdn.md](cover-art-comes-from-the-image-cdn.md).
 
 An unknown URI comes back with no entry for kind 10, and the command
 returns `null` for it.
