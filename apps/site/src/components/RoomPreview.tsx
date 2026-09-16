@@ -164,7 +164,7 @@ export function RoomPreview() {
     <section className={styles.section}>
       <div className={styles.window}>
         <RoomServicesProvider services={SERVICES}>
-          <QueueView room={room} roomId="fri-night" onSync={noop} onLeave={noop} />
+          <QueueView room={room} roomId="fri-night" onLeave={noop} />
         </RoomServicesProvider>
       </div>
     </section>

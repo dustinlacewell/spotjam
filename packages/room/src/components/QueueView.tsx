@@ -19,6 +19,7 @@ import { useRoomServices } from "../services";
 import { usePlaylists } from "./use-playlists";
 import { PlaylistsProvider } from "./playlists-context";
 import { NowPlaying } from "./NowPlaying";
+import { AttachChip } from "./AttachChip";
 import { BroadcastToggle } from "./BroadcastToggle";
 import { DetailPane } from "./DetailPane";
 import { ImportChoiceModal } from "./ImportChoiceModal";
@@ -32,13 +33,10 @@ import styles from "./QueueView.module.css";
 export function QueueView({
   room,
   roomId,
-  onSync,
   onLeave,
 }: {
   room: Room;
   roomId: string;
-  /** Attaches the local player to the room, whatever it is doing. */
-  onSync: () => void;
   onLeave: () => void;
 }) {
   const { status, participants, sessionQueue, pointer, myProgress, myQueue, queueOf, error } =
@@ -171,13 +169,11 @@ export function QueueView({
             <StatusDot tone={statusTone(status)} />
             {statusLabel(status)}
           </Pill>
+          <AttachChip />
           <BroadcastToggle
             broadcasting={broadcasting}
             onToggle={() => room.setBroadcasting(!broadcasting)}
           />
-          <Button variant="secondary" size="sm" onClick={onSync}>
-            Sync
-          </Button>
           <Button variant="secondary" size="sm" onClick={onLeave}>
             Leave room
           </Button>

@@ -6,9 +6,26 @@ import { createContext, useContext } from "react";
 import type { PlaylistService } from "./ports/playlist-service";
 import type { TrackMetadataSource } from "./ports/track-metadata";
 
+/**
+ * How the local player stands relative to the room.
+ *
+ * - `idle`: the room names no track, so there is nothing to drive.
+ * - `following`: this shell drives the local player.
+ * - `detached`: the user took the player back. Everything but playback goes on.
+ */
+export type PlayerControlState = "idle" | "following" | "detached";
+
+/** Reading the local player's control state, and taking it back. */
+export interface PlayerControl {
+  subscribe(listener: (control: PlayerControlState) => void): () => void;
+  attach(): void;
+}
+
 export interface RoomServices {
   trackMetadata: TrackMetadataSource;
   playlistService: PlaylistService;
+  /** How the local player is driven, if this shell drives one at all. Web shells pass nothing. */
+  playerControl?: PlayerControl;
 }
 
 const RoomServicesContext = createContext<RoomServices | null>(null);

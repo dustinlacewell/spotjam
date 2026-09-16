@@ -1,20 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BrowseRooms } from "./components/BrowseRooms";
 import { JoinRoom } from "./components/JoinRoom";
 import { Onboarding } from "./components/Onboarding";
-import { QueueView, RoomServicesProvider, type RoomServices } from "@spotjam/room";
+import { SpotifyGate } from "./components/SpotifyGate";
+import {
+  QueueView,
+  RoomServicesProvider,
+  type PlayerControlState,
+  type RoomServices,
+} from "@spotjam/room";
 import { Connection, Room } from "./lib/room";
 import { SyncDriver } from "./lib/sync-driver";
 import { loadIdentity, type StoredIdentity } from "./lib/identity";
 import { loadSessionPrefs, saveSessionPrefs } from "./lib/session-prefs";
 import { tauriTrackMetadata } from "./lib/track-metadata";
 import { tauriPlaylistService } from "./lib/playlist-import";
-
-/** The desktop shell's answer to what @spotjam/room asks of its surroundings. */
-const SERVICES: RoomServices = {
-  trackMetadata: tauriTrackMetadata,
-  playlistService: tauriPlaylistService,
-};
+import { tauriBridgeState } from "./lib/bridge-state";
 
 interface Session {
   roomId: string;
@@ -26,18 +27,35 @@ type PreSessionView = "join" | "browse";
 /** Null until the on-disk lookup answers; then an identity, or none. */
 type IdentityState = { status: "loading" } | { status: "ready"; identity: StoredIdentity | null };
 
-/**
- * Every screen resolves track metadata — the browser's room rows as much as the
- * joined room — so the services provider sits above all of them.
- */
 export default function App() {
-  return (
-    <RoomServicesProvider services={SERVICES}>
-      <Screens />
-    </RoomServicesProvider>
+  return <Screens />;
+}
+
+/** What @spotjam/room asks of its surroundings, answered by the desktop shell. */
+function useServices(driver: SyncDriver | null): RoomServices {
+  return useMemo(
+    () => ({
+      trackMetadata: tauriTrackMetadata,
+      playlistService: tauriPlaylistService,
+      playerControl: driver
+        ? {
+            subscribe: (listener: (control: PlayerControlState) => void) =>
+              driver.onControlChange(listener),
+            attach: () => driver.sync(),
+          }
+        : undefined,
+    }),
+    [driver],
   );
 }
 
+/**
+ * Every screen resolves track metadata — the browser's room rows as much as the
+ * joined room — so the services provider sits above all of them. The player
+ * control is the one service that needs a live driver, and there is none before
+ * a room is joined: until then it is simply absent, and the room UI reads that
+ * as a shell with no local player to report on.
+ */
 function Screens() {
   const [prefs] = useState(loadSessionPrefs);
   const [session, setSession] = useState<Session | null>(null);
@@ -45,6 +63,7 @@ function Screens() {
   const [driver, setDriver] = useState<SyncDriver | null>(null);
   const [identity, setIdentity] = useState<IdentityState>({ status: "loading" });
   const [preSessionView, setPreSessionView] = useState<PreSessionView>("join");
+  const services = useServices(driver);
 
   // The identity lives on disk, so the first render cannot know whether one
   // exists. Until this answers, showing either onboarding or the app would be
@@ -110,42 +129,43 @@ function Screens() {
     setPreSessionView("browse");
   }
 
-  if (identity.status === "loading") return null;
-  if (!identity.identity) {
-    return (
-      <Onboarding onReady={(created) => setIdentity({ status: "ready", identity: created })} />
-    );
-  }
-
-  if (!session) {
-    if (connection === null) return null;
-    if (preSessionView === "browse") {
+  function screen() {
+    if (identity.status === "loading") return null;
+    if (!identity.identity) {
       return (
-        <BrowseRooms
+        <Onboarding onReady={(created) => setIdentity({ status: "ready", identity: created })} />
+      );
+    }
+
+    if (!session) {
+      if (connection === null) return null;
+      if (preSessionView === "browse") {
+        return (
+          <BrowseRooms
+            connection={connection}
+            onJoin={handleJoin}
+            onBack={() => setPreSessionView("join")}
+          />
+        );
+      }
+      // The key is the account, so the name comes from the identity, not a form.
+      return (
+        <JoinRoom
           connection={connection}
+          username={identity.identity.username}
+          initialRoomId={prefs.lastRoomId}
           onJoin={handleJoin}
-          onBack={() => setPreSessionView("join")}
+          onBrowse={() => setPreSessionView("browse")}
         />
       );
     }
-    // The key is the account, so the name comes from the identity, not a form.
+    if (!room || !driver) return null;
     return (
-      <JoinRoom
-        connection={connection}
-        username={identity.identity.username}
-        initialRoomId={prefs.lastRoomId}
-        onJoin={handleJoin}
-        onBrowse={() => setPreSessionView("browse")}
-      />
+      <SpotifyGate source={tauriBridgeState} driver={driver}>
+        <QueueView room={room} roomId={session.roomId} onLeave={handleLeave} />
+      </SpotifyGate>
     );
   }
-  if (!room || !driver) return null;
-  return (
-    <QueueView
-      room={room}
-      roomId={session.roomId}
-      onSync={() => driver.sync()}
-      onLeave={handleLeave}
-    />
-  );
+
+  return <RoomServicesProvider services={services}>{screen()}</RoomServicesProvider>;
 }

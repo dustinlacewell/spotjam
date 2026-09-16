@@ -53,8 +53,8 @@ export type {
 
 // Progress.
 
-export { displayedProgress, formatClock } from "./lib/progress";
-export type { PlaybackProgress } from "./lib/progress";
+export { displayedProgress, formatClock, trackProgressView, PLACEHOLDER_CLOCK } from "./lib/progress";
+export type { PlaybackProgress, TrackProgressView } from "./lib/progress";
 
 // Spotify links.
 
@@ -102,7 +102,7 @@ export type { DropData } from "./lib/drop-links";
 // Services — the shell-supplied ports the room UI reads from context.
 
 export { RoomServicesProvider, useRoomServices } from "./services";
-export type { RoomServices } from "./services";
+export type { PlayerControlState, RoomServices } from "./services";
 
 // Components.
 
