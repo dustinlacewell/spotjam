@@ -38,15 +38,68 @@ pub async fn ensure_running_and_get_page_ws_url() -> Result<String> {
     ))
 }
 
+// Spotify ships two ways on Windows: the Win32 installer drops it under
+// %APPDATA%, the Microsoft Store puts it in an AppX package. Both are the same
+// Chromium binary and both honour --remote-debugging-port.
 #[cfg(target_os = "windows")]
 fn spotify_executable() -> Result<String> {
-    let path = std::env::var("APPDATA")
-        .map(|appdata| format!("{appdata}\\Spotify\\Spotify.exe"))
-        .map_err(|_| anyhow!("APPDATA not set"))?;
-    if !std::path::Path::new(&path).exists() {
-        return Err(anyhow!("Spotify.exe not found at {path}"));
+    let installed = installer_executable();
+    if let Some(path) = installed.as_ref().filter(|p| exists(p)) {
+        return Ok(path.clone());
     }
-    Ok(path)
+
+    let store = store_executable();
+    if let Some(path) = store.as_ref().filter(|p| exists(p)) {
+        return Ok(path.clone());
+    }
+
+    Err(anyhow!(
+        "Spotify.exe not found. Looked for the installer build at {} and the \
+         Microsoft Store build at {}.",
+        installed.as_deref().unwrap_or("<%APPDATA% not set>"),
+        store.as_deref().unwrap_or("<no SpotifyAB.SpotifyMusic package>"),
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn exists(path: &str) -> bool {
+    std::path::Path::new(path).exists()
+}
+
+#[cfg(target_os = "windows")]
+fn installer_executable() -> Option<String> {
+    std::env::var("APPDATA")
+        .ok()
+        .map(|appdata| format!("{appdata}\\Spotify\\Spotify.exe"))
+}
+
+/// Asks the AppX registry where the Store package lives. We cannot glob
+/// WindowsApps for it: that directory denies enumeration to the user, while the
+/// package's own subdirectory is readable and executable once its name is known.
+#[cfg(target_os = "windows")]
+fn store_executable() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+
+    // Release builds have no console of their own, so an unadorned subprocess
+    // would flash one up on every launch.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "(Get-AppxPackage -Name SpotifyAB.SpotifyMusic).InstallLocation",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+
+    let install_location = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if install_location.is_empty() {
+        return None;
+    }
+    Some(format!("{install_location}\\Spotify.exe"))
 }
 
 #[cfg(target_os = "macos")]
