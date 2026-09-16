@@ -1,7 +1,7 @@
 import { Pause, Play, SkipForward } from "lucide-react";
 import { IconButton, ProgressBar, Thumbnail } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
-import { formatClock } from "../lib/progress";
+import { trackProgressView, type PlaybackProgress } from "../lib/progress";
 import { toPlaylistTracks } from "../lib/selection";
 import { TrackContextMenu } from "./TrackContextMenu";
 import { useTrackContextMenu } from "./use-track-context-menu";
@@ -20,7 +20,7 @@ export function NowPlaying({
   /** The playing track, or null when nothing is. */
   item: QueueItem | null;
   ownerName: string;
-  progress: { positionMs: number; durationMs: number } | null;
+  progress: PlaybackProgress | null;
   isPaused: boolean;
   onTogglePause: () => void;
   onSkip: () => void;
@@ -88,38 +88,46 @@ export function NowPlaying({
 }
 
 const ARROW_STEP_MS = 5000;
-const PLACEHOLDER_CLOCK = "–:––";
 
 /**
  * ProgressBar speaks in fractions; playback speaks in milliseconds. This is
  * the one place that conversion happens, including the 5s arrow-key step
  * (a duration-aware amount ProgressBar's own 2% default can't know).
+ *
+ * `trackProgressView` decides what each half shows; only seeking is left here,
+ * since it needs the measured length the view has already folded away.
  */
 function TrackProgress({
   progress,
   onSeek,
 }: {
-  progress: { positionMs: number; durationMs: number } | null;
+  progress: PlaybackProgress | null;
   onSeek: (positionMs: number) => void;
 }) {
-  const seekTrack = progress !== null && progress.durationMs > 0 ? progress : null;
-  const fraction = seekTrack ? seekTrack.positionMs / seekTrack.durationMs : 0;
+  const view = trackProgressView(progress);
+  const durationMs = view.seekable && progress?.kind === "measured" ? progress.durationMs : null;
 
   return (
     <div className={styles.progress}>
+      {/*
+        With no length the bar draws nothing: fraction 0 and no seek handler
+        leave an empty, inert track rather than a fill implying a position
+        inside a length nobody knows. `view.indeterminate` marks that state for
+        a future ProgressBar that can style it.
+      */}
       <ProgressBar
-        fraction={fraction}
-        seekable={seekTrack !== null}
+        fraction={view.fraction}
+        seekable={durationMs !== null}
         onSeek={
-          seekTrack
-            ? (nextFraction) => onSeek(fractionToMsWithStep(nextFraction, fraction, seekTrack.durationMs))
+          durationMs !== null
+            ? (nextFraction) => onSeek(fractionToMsWithStep(nextFraction, view.fraction, durationMs))
             : undefined
         }
-        aria-label={seekTrack ? "Seek" : undefined}
+        aria-label={durationMs !== null ? "Seek" : undefined}
       />
       <div className={styles.progressClocks}>
-        <span>{progress ? formatClock(progress.positionMs) : PLACEHOLDER_CLOCK}</span>
-        <span>{progress ? formatClock(progress.durationMs) : PLACEHOLDER_CLOCK}</span>
+        <span>{view.elapsedText}</span>
+        <span>{view.trailingText}</span>
       </div>
     </div>
   );
