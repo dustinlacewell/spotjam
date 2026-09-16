@@ -1,6 +1,6 @@
 [package]
 name = "spotjam"
-version = "0.2.0"
+version = "0.3.0"
 description = "Collaborative Spotify playback rooms"
 authors = ["you"]
 edition = "2021"
@@ -38,6 +38,11 @@ uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 prost = "0.13"
 base64 = "0.23.1"
+
+[dev-dependencies]
+# `start_paused` runs a test on a virtual clock, so a test that proves a wait
+# happens does not spend that wait. Dev-only: nothing in the app drives time.
+tokio = { version = "1", features = ["test-util"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
