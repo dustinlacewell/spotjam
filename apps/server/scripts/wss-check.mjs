@@ -16,8 +16,8 @@ const url = process.argv[2] ?? "wss://yjs.ldlework.com";
 const identity = generateKeypair();
 const username = `smoke${Date.now().toString().slice(-6)}`;
 const roomId = `smoke-${Date.now().toString().slice(-6)}`;
-const TRACK = { id: "t1", uri: "spotify:track:t1", trackId: "t1" };
-const REPORTED_POSITION_MS = 42_000;
+const TRACK = { id: "t1", uri: "spotify:track:t1", trackId: "t1", durationMs: 200_000 };
+const SEEK_POSITION_MS = 42_000;
 
 const socket = new WebSocket(url);
 const seen = [];
@@ -60,7 +60,7 @@ socket.on("message", (raw) => {
   }
 
   if (event.type === "room-state") {
-    const { participants, sessionQueue, pointer, progress } = event.snapshot;
+    const { participants, sessionQueue, pointer, serverTime } = event.snapshot;
 
     if (stage === "joined") {
       console.log(
@@ -76,22 +76,16 @@ socket.on("message", (raw) => {
 
     if (stage === "broadcasting" && pointer.itemId === TRACK.id) {
       console.log(`playing: pointer=${pointer.itemId}`);
-      stage = "reported";
-      send({
-        type: "report-progress",
-        roomId,
-        itemId: TRACK.id,
-        positionMs: REPORTED_POSITION_MS,
-        durationMs: 200_000,
-        sampledAtEpochMs: Date.now(),
-      });
+      stage = "seeked";
+      send({ type: "seek", roomId, positionMs: SEEK_POSITION_MS });
       return;
     }
 
-    if (stage === "reported") {
-      // Snapshots arrive for every op, so wait for the one carrying the echo.
-      if (progress?.positionMs !== REPORTED_POSITION_MS) return;
-      console.log(`progress relayed: positionMs=${progress.positionMs}`);
+    if (stage === "seeked") {
+      // Snapshots arrive for every op, so wait for the one carrying the seek.
+      const positionMs = serverTime - pointer.startedAtEpochMs;
+      if (Math.abs(positionMs - SEEK_POSITION_MS) > 2_000) return;
+      console.log(`seek applied: positionMs=${positionMs}`);
       finish(0, "WSS ROUND-TRIP: PASS");
     }
     return;

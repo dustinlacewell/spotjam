@@ -1,19 +1,24 @@
-import type { SharedPlaylist } from "@spotjam/protocol";
-import type { ParsedTrack } from "./spotify-link";
+import type { PlaylistTrack, SharedPlaylist } from "@spotjam/protocol";
 import { shuffled } from "./shuffle";
 
 /**
  * One track's place in one playlist.
  *
- * A `ParsedTrack` says *which track*. A row says *this occurrence of it, here*
- * — which is what Spotify's playlist service removes and reorders, and why it
- * gives each row a `uid` of its own rather than keying on the track.
+ * A `PlaylistTrack` says *which track, and how long*. A row says *this
+ * occurrence of it, here* — which is what Spotify's playlist service removes
+ * and reorders, and why it gives each row a `uid` of its own rather than
+ * keying on the track.
+ *
+ * The length rides along because a playlist is a place tracks are queued from,
+ * and a queue item must carry one. Carrying it here means the lookup happens
+ * once, where the track entered — a fetch, or a pasted link — rather than
+ * again on every enqueue.
  *
  * The uid belongs to Spotify's copy, so a local playlist's rows have none, and
  * `toSharedPlaylists` never puts it on the wire.
  */
 export interface PlaylistRow {
-  track: ParsedTrack;
+  track: PlaylistTrack;
   /** Spotify's identity for this row. Absent for a local playlist. */
   uid?: string;
 }
@@ -58,12 +63,12 @@ export interface Playlist {
 const LOCAL: PlaylistSource = { kind: "local" };
 
 /** The track references a playlist holds, in order. */
-export function tracksOf(playlist: Playlist): ParsedTrack[] {
+export function tracksOf(playlist: Playlist): PlaylistTrack[] {
   return playlist.rows.map((row) => row.track);
 }
 
 /** Wraps bare tracks as rows with no Spotify identity. */
-export function rowsOfTracks(tracks: ParsedTrack[]): PlaylistRow[] {
+export function rowsOfTracks(tracks: PlaylistTrack[]): PlaylistRow[] {
   return tracks.map((track) => ({ track }));
 }
 
@@ -215,7 +220,7 @@ export function renamePlaylist(lists: Playlist[], id: string, name: string): Pla
 export function insertTracksIntoPlaylist(
   lists: Playlist[],
   id: string,
-  tracks: ParsedTrack[],
+  tracks: PlaylistTrack[],
   beforeTrackId: string | null,
 ): Playlist[] {
   if (tracks.length === 0) return lists;
@@ -297,7 +302,11 @@ export function toSharedPlaylists(lists: Playlist[]): SharedPlaylist[] {
     .map((list) => ({
       id: list.id,
       name: list.name,
-      tracks: list.rows.map((row) => ({ uri: row.track.uri, trackId: row.track.trackId })),
+      tracks: list.rows.map((row) => ({
+        uri: row.track.uri,
+        trackId: row.track.trackId,
+        durationMs: row.track.durationMs,
+      })),
     }));
 }
 

@@ -28,6 +28,7 @@ import { handleOp, type ErrorCode } from "./handle-op.ts";
 import type { IdentityStore } from "./identity-store.ts";
 import type { Clock, Rng } from "./ports.ts";
 import type { ReplayGuard } from "./replay-guard.ts";
+import { RoomClock, nodeTimers, type Timers } from "./room-clock.ts";
 import * as Room from "./room-state.ts";
 import { sameSummary, summarize } from "./room-summary.ts";
 import type { RoomRegistry } from "./rooms.ts";
@@ -38,6 +39,8 @@ export interface SessionDeps {
   replay: ReplayGuard;
   clock: Clock;
   rng: Rng;
+  /** How the room clock schedules a track end. Node's timers unless a test says otherwise. */
+  timers?: Timers;
 }
 
 /**
@@ -52,14 +55,27 @@ export class Session {
   /**
    * The last summary published for each room.
    *
-   * The gate for list watchers: a room commits on every progress tick, and a
-   * tick changes nothing a browser shows. Without this, watching the list
-   * would cost one push per second per live room.
+   * The gate for list watchers: a room commits on every seek, pause and
+   * reorder, and none of those change what a browser shows. Without this,
+   * watching the list would cost a push for each one, for every live room.
    */
   readonly #lastSummary = new Map<string, RoomSummary>();
+  /** Ends tracks on the server's clock, since no client reports a track end. */
+  readonly #roomClock: RoomClock;
 
   constructor(deps: SessionDeps) {
     this.#deps = deps;
+    this.#roomClock = new RoomClock({
+      rooms: deps.rooms,
+      clock: deps.clock,
+      timers: deps.timers ?? nodeTimers,
+      publish: (roomId) => this.#publish(roomId),
+    });
+  }
+
+  /** Drop every pending track-end timer. For shutdown. */
+  stop(): void {
+    this.#roomClock.cancelAll();
   }
 
   add(connection: Connection): void {
@@ -217,6 +233,9 @@ export class Session {
     rooms.commit(outcome.state);
 
     if (outcome.error !== undefined) {
+      // A refused op still settled the room on the way in, so the timer may be
+      // describing a track that already ended. Re-point it; tell nobody.
+      this.#roomClock.arm(op.roomId);
       send(connection, error(outcome.error, `Op ${op.type} refused: ${outcome.error}.`));
       return;
     }
@@ -328,9 +347,14 @@ export class Session {
    * Three audiences: its members, whoever is peeking at it, and whoever is
    * watching the room list. One snapshot per recipient, because myQueue is the
    * recipient's own.
+   *
+   * Every committed change reaches here, so this is also where the track-end
+   * timer is re-pointed: one place, and no path can move the pointer without
+   * the clock hearing about it.
    */
   #publish(roomId: string): void {
     const { rooms, clock } = this.#deps;
+    this.#roomClock.arm(roomId);
     const state = rooms.get(roomId);
     const now = clock.now();
 
@@ -342,7 +366,7 @@ export class Session {
       });
     }
 
-    // Watchers see position, so a progress tick is news to them.
+    // Watchers see position, so a seek or a pause is news to them.
     for (const connection of connectionsWatchingRoom(this.#connections, roomId)) {
       if (connection.pubkey === null) continue;
       send(connection, {

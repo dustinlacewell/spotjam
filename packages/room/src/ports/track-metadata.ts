@@ -7,6 +7,14 @@ export interface TrackInfo {
   title: string;
   artist: string;
   thumbnailUrl: string | null;
+  /**
+   * Track length in ms.
+   *
+   * Not a display field: it is what a queue item must carry for the server to
+   * advance the pointer past it, and this lookup is where a link's length
+   * comes from.
+   */
+  durationMs: number;
 }
 
 export interface TrackMetadataSource {

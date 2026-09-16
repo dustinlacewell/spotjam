@@ -62,6 +62,9 @@ pub struct PlaylistTrack {
     /// address rows by uid, not by track uri, so this is what makes either
     /// possible.
     pub uid: String,
+    /// Track length in milliseconds, as the client's list API reports it.
+    /// 0 when it reports nothing usable.
+    pub duration_ms: u64,
 }
 
 /// Why a playlist fetch produced nothing.
@@ -181,6 +184,7 @@ async fn fetch_inner(
                             .filter((n) => typeof n === "string" && n.length > 0)
                             .join(", "),
                         uid: item.uid ?? "",
+                        durationMs: item?.duration?.milliseconds ?? 0,
                     }}));
                 return JSON.stringify({{
                     ok: true,
@@ -315,6 +319,10 @@ fn track_from_json(item: &Value) -> Option<PlaylistTrack> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
+        duration_ms: item
+            .get("durationMs")
+            .map(super::player_api::non_negative_u64)
+            .unwrap_or(0),
     })
 }
 
@@ -656,6 +664,27 @@ mod tests {
             ],
         });
         assert_eq!(parse_fetch_result(&value).unwrap().tracks[0].uid, "abc123");
+    }
+
+    /// The page reports `duration.milliseconds`, which is whatever the client
+    /// had. Anything absent, negative or non-numeric must read as 0 rather
+    /// than wrap into an enormous u64.
+    #[test]
+    fn carries_each_rows_duration_and_guards_junk() {
+        let value = serde_json::json!({
+            "ok": true,
+            "name": "Mine",
+            "tracks": [
+                { "uri": "spotify:track:a", "durationMs": 214000 },
+                { "uri": "spotify:track:b", "durationMs": -1 },
+                { "uri": "spotify:track:c", "durationMs": "nope" },
+                { "uri": "spotify:track:d", "durationMs": null },
+                { "uri": "spotify:track:e" },
+            ],
+        });
+        let tracks = parse_fetch_result(&value).unwrap().tracks;
+        let durations: Vec<u64> = tracks.iter().map(|t| t.duration_ms).collect();
+        assert_eq!(durations, vec![214_000, 0, 0, 0, 0]);
     }
 
     /// The two specs are not symmetric — `{before:{type:"end"}}` appends for

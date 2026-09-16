@@ -61,39 +61,93 @@ pub async fn seek(cdp: &CdpClient, position_ms: u64) -> Result<()> {
     Ok(())
 }
 
-pub async fn get_state(cdp: &CdpClient) -> Result<PlayerState> {
-    ensure_player_api(cdp).await?;
-    let value: Value = cdp
-        .evaluate(
-            r#"(async () => {
+/// One async JS expression that reads `getState()` and evaluates to the plain
+/// object the Rust side parses. Shared verbatim by `get_state` and `observe`
+/// so the two can never drift into reporting different positions.
+///
+/// It is an expression, not a statement block: both callers embed it inside a
+/// larger async arrow and `await` it.
+const STATE_EXPR_JS: &str = r#"(async () => {
                 const s = await window.__playerApi.getState();
                 const isPaused = s?.isPaused ?? true;
                 const base = s?.positionAsOfTimestamp ?? 0;
                 const raw = isPaused
                     ? base
                     : base + (Date.now() - (s?.timestamp ?? Date.now()));
-                return JSON.stringify({
+                return {
                     trackUri: s?.item?.uri ?? null,
                     trackName: s?.item?.name ?? null,
                     isPaused,
                     positionMs: Math.max(0, Math.round(raw)),
                     durationMs: Math.max(0, Math.round(s?.duration ?? 0)),
-                });
-            })()"#,
-        )
-        .await?;
+                };
+            })()"#;
+
+fn get_state_js() -> String {
+    format!("(async () => JSON.stringify(await {STATE_EXPR_JS}))()")
+}
+
+pub async fn get_state(cdp: &CdpClient) -> Result<PlayerState> {
+    ensure_player_api(cdp).await?;
+    let value: Value = cdp.evaluate(&get_state_js()).await?;
 
     let json_str = value
         .as_str()
         .ok_or_else(|| anyhow!("getState did not return a JSON string: {value}"))?;
     let parsed: Value = serde_json::from_str(json_str)?;
 
-    Ok(PlayerState {
+    Ok(player_state_from_json(&parsed))
+}
+
+fn player_state_from_json(parsed: &Value) -> PlayerState {
+    PlayerState {
         track_uri: parsed["trackUri"].as_str().map(String::from),
         track_name: parsed["trackName"].as_str().map(String::from),
         is_paused: parsed["isPaused"].as_bool().unwrap_or(true),
         position_ms: non_negative_u64(&parsed["positionMs"]),
         duration_ms: non_negative_u64(&parsed["durationMs"]),
+    }
+}
+
+/// Everything one sync tick needs from the client, read together.
+///
+/// Playback state and the head of the user queue come back from a single
+/// evaluation, so the two cannot describe different moments.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Observation {
+    pub state: PlayerState,
+    /// The first user-queued URI, or `None` when the queue is empty.
+    pub queue_head: Option<String>,
+}
+
+/// Builds the one expression that reads state and queue head together.
+fn observe_js() -> String {
+    format!(
+        r#"(async () => {{
+            const state = await {STATE_EXPR_JS};
+            const q = await window.__playerApi.getQueue();
+            const head = (q?.queued ?? [])
+                .map((item) => item?.uri)
+                .find((uri) => typeof uri === "string") ?? null;
+            return JSON.stringify({{ state, queueHead: head }});
+        }})()"#
+    )
+}
+
+/// Reads playback state and the queue head in one round trip.
+pub async fn observe(cdp: &CdpClient) -> Result<Observation> {
+    ensure_player_api(cdp).await?;
+    let value: Value = cdp.evaluate(&observe_js()).await?;
+
+    let json_str = value
+        .as_str()
+        .ok_or_else(|| anyhow!("observe did not return a JSON string: {value}"))?;
+    let parsed: Value = serde_json::from_str(json_str)?;
+
+    Ok(Observation {
+        state: player_state_from_json(&parsed["state"]),
+        queue_head: parsed["queueHead"].as_str().map(String::from),
     })
 }
 
@@ -167,7 +221,7 @@ pub async fn get_queue(cdp: &CdpClient) -> Result<Vec<String>> {
 
 /// Reads a JSON number as milliseconds, clamping anything negative,
 /// fractional, or non-numeric to a sane u64.
-fn non_negative_u64(value: &Value) -> u64 {
+pub(super) fn non_negative_u64(value: &Value) -> u64 {
     value
         .as_u64()
         .or_else(|| value.as_f64().map(|f| f.max(0.0) as u64))
@@ -224,6 +278,53 @@ mod tests {
         let js = set_next_track_js(&uri_json);
         assert!(js.contains(r#"\"); alert(1); (""#));
         assert!(!js.contains(r#"a"); alert(1); ("#));
+    }
+
+    /// One tick, one evaluation. If either read moved out of this expression
+    /// the two halves could describe different moments.
+    #[test]
+    fn observing_reads_the_state_and_the_queue_in_one_expression() {
+        let js = observe_js();
+        assert!(js.contains("getState"), "observe must read playback state");
+        assert!(js.contains("getQueue"), "observe must read the queue");
+        assert!(js.contains("queueHead"), "observe must report the queue head");
+    }
+
+    /// `get_state` and `observe` must read position from the same snippet, or
+    /// they can report different positions for the same instant.
+    #[test]
+    fn both_reads_share_the_state_snippet() {
+        assert!(get_state_js().contains(STATE_EXPR_JS));
+        assert!(observe_js().contains(STATE_EXPR_JS));
+    }
+
+    #[test]
+    fn parses_an_observation_payload() {
+        let parsed = serde_json::json!({
+            "state": {
+                "trackUri": "spotify:track:abc",
+                "trackName": "One",
+                "isPaused": false,
+                "positionMs": 1500,
+                "durationMs": 214000,
+            },
+            "queueHead": "spotify:track:def",
+        });
+        let state = player_state_from_json(&parsed["state"]);
+        assert_eq!(state.track_uri.as_deref(), Some("spotify:track:abc"));
+        assert!(!state.is_paused);
+        assert_eq!(state.position_ms, 1500);
+        assert_eq!(state.duration_ms, 214_000);
+        assert_eq!(parsed["queueHead"].as_str(), Some("spotify:track:def"));
+    }
+
+    /// An absent state object must not read as playing at position 0.
+    #[test]
+    fn a_shapeless_state_reads_as_paused() {
+        let state = player_state_from_json(&Value::Null);
+        assert!(state.is_paused);
+        assert_eq!(state.track_uri, None);
+        assert_eq!(state.position_ms, 0);
     }
 
     #[test]

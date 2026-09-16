@@ -15,7 +15,6 @@ import {
   moveMany,
   type Participant,
   type PlaybackPointer,
-  type Progress,
   type PublicKeyHex,
   type QueueItem,
   type SessionEntry,
@@ -31,7 +30,6 @@ import {
   listParticipants,
   mapQueue,
   memberOf,
-  positionOf,
   seek,
   setBroadcasting,
   setPaused,
@@ -87,7 +85,6 @@ export class MockRoom implements Room {
   readonly myPubkey: PublicKeyHex;
 
   #state: MockState;
-  #durations: Map<string, number>;
   /** The room's copy of everyone's public playlists, keyed by owner. */
   readonly #playlists = new Map<PublicKeyHex, SharedPlaylist[]>();
   /** How many times each owner has replaced their set. Seeding does not count. */
@@ -102,14 +99,13 @@ export class MockRoom implements Room {
     this.myPubkey = seed.myPubkey;
     this.#clock = seed.clock ?? Date.now;
     this.#rng = seed.rng ?? Math.random;
-    this.#durations = new Map(Object.entries(seed.durations ?? {}));
     for (const participant of seed.participants) {
       if (participant.publicPlaylists) {
         this.#playlists.set(participant.pubkey, participant.publicPlaylists);
       }
     }
     this.#state = seedState(seed);
-    this.#state = startPlayback(this.#state, seed, this.#clock(), this.#durations);
+    this.#state = startPlayback(this.#state, seed, this.#clock());
   }
 
   // --- subscriptions -------------------------------------------------
@@ -163,18 +159,12 @@ export class MockRoom implements Room {
     return this.#state.pointer;
   }
 
-  /** Derived from the pointer and the clock: there is no player to sample. */
-  myProgress(): Progress | null {
-    const pointer = this.#state.pointer;
-    if (pointer.itemId === null) return null;
-    const now = this.#clock();
-    const durationMs = this.#durationOf(pointer.itemId);
-    return {
-      itemId: pointer.itemId,
-      positionMs: positionOf(pointer, now, durationMs),
-      durationMs,
-      sampledAtEpochMs: now,
-    };
+  /**
+   * A mock room is its own server, so its clock is the server's: there is no
+   * offset to fold and nothing to correct for.
+   */
+  serverNow(): number {
+    return this.#clock();
   }
 
   /** Nothing here can fail, so there is never an error to report. */
@@ -299,10 +289,6 @@ export class MockRoom implements Room {
   #emitChange(): void {
     for (const listener of this.#changeListeners) listener();
   }
-
-  #durationOf(itemId: string): number {
-    return this.#durations.get(itemId) ?? DEFAULT_DURATION_MS;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -310,17 +296,41 @@ export class MockRoom implements Room {
 // ---------------------------------------------------------------------------
 
 function seedState(seed: MockRoomSeed): MockState {
+  const lengths = seedLengths(seed);
   return {
     members: seed.participants.map((participant) => ({
       pubkey: participant.pubkey,
       username: participant.username,
       broadcasting: participant.broadcasting,
-      queue: [...participant.queue],
+      queue: participant.queue.map((item) => withLength(item, lengths)),
     })),
     order: seed.participants.map((participant) => participant.pubkey),
     pointer: NULL_POINTER,
     turnCursor: 0,
   };
+}
+
+/**
+ * The track lengths the seed names, by item id.
+ *
+ * `playing.durationMs` is folded in with them: naming a playing item's length
+ * there is the same statement as naming it in `durations`, and the pointer
+ * reads its length off the item either way.
+ */
+function seedLengths(seed: MockRoomSeed): Map<string, number> {
+  const lengths = new Map(Object.entries(seed.durations ?? {}));
+  if (seed.playing) lengths.set(seed.playing.itemId, seed.playing.durationMs);
+  return lengths;
+}
+
+/**
+ * A seeded item's length: what the seed says, else what the item already
+ * carries, else the house default. A seed written before items carried their
+ * own length still gets a playable room.
+ */
+function withLength(item: QueueItem, lengths: Map<string, number>): QueueItem {
+  const durationMs = lengths.get(item.id) ?? (item.durationMs > 0 ? item.durationMs : DEFAULT_DURATION_MS);
+  return item.durationMs === durationMs ? item : { ...item, durationMs };
 }
 
 /**
@@ -331,18 +341,11 @@ function seedState(seed: MockRoomSeed): MockState {
  * replaying the rotation until the pointer lands on it, so the queues and the
  * turn cursor end up exactly where a real room's would.
  */
-function startPlayback(
-  state: MockState,
-  seed: MockRoomSeed,
-  now: number,
-  durations: Map<string, number>,
-): MockState {
+function startPlayback(state: MockState, seed: MockRoomSeed, now: number): MockState {
   const playing = seed.playing;
   if (playing === null) return state;
 
   if (playing === undefined) return settleStart(state, now);
-
-  durations.set(playing.itemId, playing.durationMs);
 
   const target = advanceTo(state, playing.itemId, now);
   if (target === null) return state;

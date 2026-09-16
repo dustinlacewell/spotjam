@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Button, HintLine } from "@spotjam/ui";
 import type { BridgeState, BridgeStateSource } from "../lib/bridge-state";
-import type { SyncDriver } from "../lib/sync-driver";
+import type { PlaybackDriver } from "../lib/playback/driver";
 import { gatePresentation, PATIENCE_MS, type GatePhase } from "./gate-presentation";
 import styles from "./SpotifyGate.module.css";
 
@@ -47,7 +47,7 @@ function useGatePhase(state: BridgeState | null): GatePhase {
 
 interface SpotifyGateProps {
   source: BridgeStateSource;
-  driver: SyncDriver;
+  driver: PlaybackDriver;
   children: ReactNode;
 }
 
@@ -72,7 +72,7 @@ export function SpotifyGate({ source, driver, children }: SpotifyGateProps) {
           onSync={async () => {
             const answer = await source.connect();
             apply(answer);
-            driver.sync();
+            driver.attach();
             return answer;
           }}
         />

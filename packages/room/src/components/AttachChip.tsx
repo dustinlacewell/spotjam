@@ -3,14 +3,14 @@ import { Pill, StatusDot } from "@spotjam/ui";
 import { useRoomServices, type PlayerControl, type PlayerControlState } from "../services";
 
 /**
- * Whether spotjam drives the local player, and the way back when it does not.
+ * Whether spotjam drives the local player, and the way in or out.
  *
  * Only a shell with a local player has an answer, so a shell that passes no
  * `playerControl` — the web one — gets no chip at all.
  *
- * Detached is the one state the user can act on: spotjam left the player alone
- * because the user took it, and a click hands it back. The other two states are
- * a label, not a control, so they render as a span.
+ * Attached and detached are both the user's to change, so both are buttons: one
+ * hands the player back to them, the other takes it again. With no Spotify
+ * there is nothing to hand either way, so that state is a label.
  */
 export function AttachChip() {
   const { playerControl } = useRoomServices();
@@ -20,6 +20,15 @@ export function AttachChip() {
 
 function Chip({ control }: { control: PlayerControl }) {
   const state = useControlState(control.subscribe);
+
+  if (state === "no-spotify") {
+    return (
+      <Pill as="span">
+        <StatusDot tone="muted" />
+        No Spotify
+      </Pill>
+    );
+  }
 
   if (state === "detached") {
     return (
@@ -31,8 +40,8 @@ function Chip({ control }: { control: PlayerControl }) {
   }
 
   return (
-    <Pill as="span">
-      <StatusDot tone={state === "following" ? "accent" : "muted"} />
+    <Pill as="button" onClick={control.detach} title="Stop controlling Spotify">
+      <StatusDot tone="accent" />
       Attached
     </Pill>
   );
@@ -40,9 +49,9 @@ function Chip({ control }: { control: PlayerControl }) {
 
 /** The driver calls back with the current state on subscribe, so there is no gap to cover. */
 function useControlState(
-  subscribe: (listener: (control: PlayerControlState) => void) => () => void,
+  subscribe: (listener: (state: PlayerControlState) => void) => () => void,
 ): PlayerControlState {
-  const [state, setState] = useState<PlayerControlState>("idle");
+  const [state, setState] = useState<PlayerControlState>("no-spotify");
   useEffect(() => subscribe(setState), [subscribe]);
   return state;
 }

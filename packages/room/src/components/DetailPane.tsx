@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { SharedPlaylist } from "@spotjam/protocol";
+import type { PlaylistTrack, SharedPlaylist } from "@spotjam/protocol";
 import type { Playlist } from "../lib/playlists";
 import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import type { PlaylistsApi } from "./use-playlists";
@@ -43,8 +43,13 @@ export function DetailPane({
   onReplaceQueue: (tracks: ParsedTrack[]) => void;
   /** Links dropped or pasted on the queue pane. */
   onQueueLinks: (links: ParsedLinks) => void;
-  /** Tracks land in the open playlist; playlist links import as new playlists. */
-  onLinks: (links: ParsedLinks, onTracks: (tracks: ParsedTrack[]) => void) => void;
+  /**
+   * Tracks land in the open playlist; playlist links import as new playlists.
+   *
+   * The tracks reach `onTracks` with their lengths already resolved: a playlist
+   * is a place tracks are queued from, and a queue item must carry one.
+   */
+  onLinks: (links: ParsedLinks, onTracks: (tracks: PlaylistTrack[]) => void) => void;
   /** Opens the dialog that links a Spotify playlist. */
   onLinkPlaylist: () => void;
   /** A playlist link dropped on the playlist list asks whether to copy or link it. */
@@ -195,7 +200,7 @@ function asPlaylist(shared: SharedPlaylist): Playlist {
     id: shared.id,
     name: shared.name,
     rows: shared.tracks.map((track) => ({
-      track: { uri: track.uri, trackId: track.trackId },
+      track: { uri: track.uri, trackId: track.trackId, durationMs: track.durationMs },
     })),
     isPublic: true,
     // A peer's playlist is a copy of their tracks. Whether they keep it linked

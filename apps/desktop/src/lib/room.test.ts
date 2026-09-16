@@ -4,9 +4,11 @@ import {
   canonicalBytes,
   generateKeypair,
   open,
+  positionAt,
   signBytes,
   type Envelope,
   type Keypair,
+  type QueueItem,
   type RoomSnapshot,
   type ServerEvent,
 } from "@spotjam/protocol";
@@ -101,7 +103,10 @@ function makeRoom(options: { username?: string } = {}) {
       now: () => EPOCH,
     },
   );
-  const room = new RoomClient(connection, ROOM);
+  // This machine's clock, apart from the server's. The two start equal so a
+  // test that says nothing about skew sees none; `setLocalNow` introduces it.
+  let localNow = EPOCH;
+  const room = new RoomClient(connection, ROOM, () => localNow);
 
   return {
     room,
@@ -109,6 +114,9 @@ function makeRoom(options: { username?: string } = {}) {
     keypair,
     sockets,
     timers,
+    setLocalNow: (value: number) => {
+      localNow = value;
+    },
     latest: () => sockets[sockets.length - 1],
     /** Runs the pending reconnect timer, as a real clock would. */
     runTimer: () => {
@@ -118,6 +126,11 @@ function makeRoom(options: { username?: string } = {}) {
   };
 }
 
+/** A queue item. Every one carries a length; nothing here cares which. */
+function item(id: string, trackId = id): QueueItem {
+  return { id, uri: `spotify:track:${trackId}`, trackId, durationMs: 200_000 };
+}
+
 function snapshot(overrides: Partial<RoomSnapshot> = {}): RoomSnapshot {
   return {
     roomId: ROOM,
@@ -125,7 +138,6 @@ function snapshot(overrides: Partial<RoomSnapshot> = {}): RoomSnapshot {
     sessionQueue: [],
     myQueue: [],
     pointer: NULL_POINTER,
-    progress: null,
     serverTime: EPOCH,
     ...overrides,
   };
@@ -346,7 +358,7 @@ describe("RoomClient ops", () => {
   it("maps every mutating method onto its op", async () => {
     const { room, latest } = await connected();
 
-    room.appendToMyQueue([{ id: "i1", uri: "spotify:track:x", trackId: "x" }]);
+    room.appendToMyQueue([item("i1", "x")]);
     room.removeFromMyQueue("i1");
     room.moveManyInMyQueue(["i1"], "i2");
     room.sendToTopOfMyQueue("i2");
@@ -375,13 +387,13 @@ describe("RoomClient ops", () => {
 
   it("carries the op's own fields", async () => {
     const { room, latest } = await connected();
-    const item = { id: "i1", uri: "spotify:track:x", trackId: "x" };
+    const queued = item("i1", "x");
 
-    room.appendToMyQueue([item]);
+    room.appendToMyQueue([queued]);
     room.seekTo(4200);
     await settle();
 
-    expect(latest().payloads()[0]).toEqual({ type: "enqueue", roomId: ROOM, items: [item] });
+    expect(latest().payloads()[0]).toEqual({ type: "enqueue", roomId: ROOM, items: [queued] });
     expect(latest().payloads()[1]).toEqual({ type: "seek", roomId: ROOM, positionMs: 4200 });
     room.destroy();
   });
@@ -389,7 +401,7 @@ describe("RoomClient ops", () => {
   it("replaces a queue as a clear followed by an enqueue", async () => {
     const { room, latest } = await connected();
 
-    room.replaceMyQueue([{ id: "i1", uri: "spotify:track:x", trackId: "x" }]);
+    room.replaceMyQueue([item("i1", "x")]);
     await settle();
 
     expect(latest().types()).toEqual(["clear-queue", "enqueue"]);
@@ -406,113 +418,91 @@ describe("RoomClient ops", () => {
     room.destroy();
   });
 
-  it("reports progress to the server and keeps the sample for the local bar", async () => {
-    const { room, latest } = await connected();
+  it("reads local time as server time before any snapshot", async () => {
+    const { room, setLocalNow } = await connected();
 
-    // The sample only means anything while the room is playing that track.
-    latest().deliver({
-      type: "room-state",
-      snapshot: snapshot({
-        pointer: { ...NULL_POINTER, itemId: "i1", uri: "spotify:track:x" },
-      }),
-    });
-    await settle();
-
-    room.setMyProgress({
-      itemId: "i1",
-      positionMs: 5000,
-      durationMs: 200_000,
-      sampledAtEpochMs: EPOCH,
-    });
-    await settle();
-
-    expect(latest().payloads()[0]).toEqual({
-      type: "report-progress",
-      roomId: ROOM,
-      itemId: "i1",
-      positionMs: 5000,
-      durationMs: 200_000,
-      sampledAtEpochMs: EPOCH,
-    });
-    expect(room.myProgress()?.positionMs).toBe(5000);
+    // Nothing has been folded yet, so there is no offset to apply. Nothing is
+    // playing either, so nothing reads a position out of the guess.
+    setLocalNow(EPOCH + 1234);
+    expect(room.serverNow()).toBe(EPOCH + 1234);
     room.destroy();
   });
 
-  it("clears the local sample without sending anything", async () => {
-    const { room, latest } = await connected();
+  it("folds each snapshot's server time into its clock offset", async () => {
+    const { room, latest, setLocalNow } = await connected();
 
-    room.setMyProgress(null);
+    // The server's clock reads 5s ahead of this machine's.
+    setLocalNow(EPOCH);
+    latest().deliver({
+      type: "room-state",
+      snapshot: snapshot({ serverTime: EPOCH + 5_000 }),
+    });
     await settle();
 
-    expect(room.myProgress()).toBeNull();
-    expect(latest().sent).toHaveLength(0);
+    expect(room.serverNow()).toBe(EPOCH + 5_000);
     room.destroy();
   });
 
-  it("prefers the broadcaster's sample over its own", async () => {
-    const { room, latest } = await connected();
-    const pointer = { ...NULL_POINTER, itemId: "i1", uri: "spotify:track:x" };
+  it("keeps the offset as the local clock moves on", async () => {
+    const { room, latest, setLocalNow } = await connected();
 
-    // A listener's own player is silent, so its sample is meaningless here.
-    room.setMyProgress({
-      itemId: "i1",
-      positionMs: 1000,
-      durationMs: 200_000,
-      sampledAtEpochMs: EPOCH,
+    setLocalNow(EPOCH);
+    latest().deliver({
+      type: "room-state",
+      snapshot: snapshot({ serverTime: EPOCH + 5_000 }),
     });
+    await settle();
+
+    // The offset is a constant shift, not a frozen reading: local time runs on
+    // and the server clock runs on with it.
+    setLocalNow(EPOCH + 30_000);
+    expect(room.serverNow()).toBe(EPOCH + 35_000);
+    room.destroy();
+  });
+
+  it("lets a position read off the pointer land inside the track", async () => {
+    const { room, latest, setLocalNow } = await connected();
+
+    // The server started the track 10s ago in its own clock, which is 60s
+    // ahead of ours. Read against Date.now() this would be a minute wrong.
+    setLocalNow(EPOCH);
     latest().deliver({
       type: "room-state",
       snapshot: snapshot({
-        pointer,
-        progress: {
+        serverTime: EPOCH + 60_000,
+        pointer: {
+          ...NULL_POINTER,
           itemId: "i1",
-          positionMs: 90_000,
+          uri: "spotify:track:x",
+          startedAtEpochMs: EPOCH + 50_000,
           durationMs: 200_000,
-          sampledAtEpochMs: EPOCH,
         },
       }),
     });
     await settle();
 
-    expect(room.myProgress()?.positionMs).toBe(90_000);
+    expect(positionAt(room.getPlaybackPointer(), room.serverNow())).toBe(10_000);
     room.destroy();
   });
 
-  it("falls back to its own sample until the server echoes one", async () => {
-    const { room, latest } = await connected();
-    const pointer = { ...NULL_POINTER, itemId: "i1", uri: "spotify:track:x" };
+  it("blends a later sample rather than swapping to it", async () => {
+    const { room, latest, setLocalNow } = await connected();
 
-    latest().deliver({ type: "room-state", snapshot: snapshot({ pointer }) });
-    room.setMyProgress({
-      itemId: "i1",
-      positionMs: 1000,
-      durationMs: 200_000,
-      sampledAtEpochMs: EPOCH,
-    });
+    setLocalNow(EPOCH);
+    latest().deliver({ type: "room-state", snapshot: snapshot({ serverTime: EPOCH }) });
     await settle();
+    expect(room.serverNow()).toBe(EPOCH);
 
-    expect(room.myProgress()?.positionMs).toBe(1000);
-    room.destroy();
-  });
-
-  it("ignores a local sample left over from the previous track", async () => {
-    const { room, latest } = await connected();
-
-    room.setMyProgress({
-      itemId: "i1",
-      positionMs: 1000,
-      durationMs: 200_000,
-      sampledAtEpochMs: EPOCH,
-    });
+    // One late frame must not yank the bar: the offset moves a step at a time.
     latest().deliver({
       type: "room-state",
-      snapshot: snapshot({
-        pointer: { ...NULL_POINTER, itemId: "i2", uri: "spotify:track:y" },
-      }),
+      snapshot: snapshot({ serverTime: EPOCH + 10_000 }),
     });
     await settle();
 
-    expect(room.myProgress()).toBeNull();
+    const drift = room.serverNow() - EPOCH;
+    expect(drift).toBeGreaterThan(0);
+    expect(drift).toBeLessThan(10_000);
     room.destroy();
   });
 });
@@ -525,11 +515,7 @@ describe("RoomClient snapshots", () => {
     latest().open();
     await settle();
 
-    const entry = {
-      item: { id: "a1", uri: "ua1", trackId: "a1" },
-      ownerPubkey: room.myPubkey,
-      ownerName: "alice",
-    };
+    const entry = { item: item("a1"), ownerPubkey: room.myPubkey, ownerName: "alice" };
     latest().deliver({
       type: "room-state",
       snapshot: snapshot({
@@ -595,10 +581,7 @@ describe("RoomClient snapshots", () => {
 
 describe("RoomClient queue restore", () => {
   const KEY = `spotjam.queue.${ROOM}`;
-  const STORED = [
-    { id: "i1", uri: "spotify:track:x", trackId: "x" },
-    { id: "i2", uri: "spotify:track:y", trackId: "y" },
-  ];
+  const STORED = [item("i1", "x"), item("i2", "y")];
 
   /** Every enqueue payload the live socket has been handed. */
   function enqueues(socket: FakeSocket): unknown[] {

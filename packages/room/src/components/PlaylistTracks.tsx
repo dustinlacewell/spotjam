@@ -385,6 +385,7 @@ function cardItem(row: PlaylistRow): QueueItem {
     id: row.track.trackId,
     uri: row.track.uri,
     trackId: row.track.trackId,
+    durationMs: row.track.durationMs,
   };
 }
 

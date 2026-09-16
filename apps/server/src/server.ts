@@ -79,7 +79,11 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   return {
     port: addressPort(http, port),
     rooms,
-    close: () => shutdown(http, wss),
+    close: async () => {
+      // Pending track-end timers would otherwise keep the process alive.
+      session.stop();
+      await shutdown(http, wss);
+    },
   };
 }
 

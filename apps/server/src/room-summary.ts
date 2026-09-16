@@ -2,7 +2,7 @@
 //
 // Pure. `summarize` is the only place a RoomState becomes a RoomSummary, and
 // `sameSummary` is what lets the shell skip a push: a room commits on every
-// progress tick, and none of those ticks change a line in a room browser.
+// seek, pause and reorder, and none of those change a line in a room browser.
 
 import type { RoomSummary } from "@spotjam/protocol";
 

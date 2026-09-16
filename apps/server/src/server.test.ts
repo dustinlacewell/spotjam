@@ -123,7 +123,7 @@ describe("server", () => {
       {
         type: "enqueue",
         roomId: "jam",
-        items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1" }],
+        items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: 200_000 }],
       },
       alice,
     );

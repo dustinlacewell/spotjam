@@ -14,7 +14,6 @@ import {
   type Op,
   type Participant,
   type PlaybackPointer,
-  type Progress,
   type PublicKeyHex,
   type QueueItem,
   type RoomSnapshot,
@@ -23,6 +22,7 @@ import {
   type SharedPlaylist,
 } from "@spotjam/protocol";
 
+import { foldOffset, serverNow } from "./clock-offset";
 import type { ParsedTrack } from "./spotify-link";
 
 /** How the socket is doing, for the status line. */
@@ -33,16 +33,6 @@ export interface ConnectionStatus {
   /** True once a room snapshot has arrived, so the UI shows real data. */
   synced: boolean;
 }
-
-/**
- * Where a player actually sits, as opposed to where the pointer says playback
- * started. The broadcaster samples its own player, the server keeps the newest
- * sample, and it rides back out in every snapshot so all clients draw one bar.
- *
- * Re-exported from the protocol rather than redeclared: the wire shape is the
- * only definition, so the two cannot drift.
- */
-export type { Progress };
 
 /**
  * The last snapshot, plus the fields a fresh client has before one arrives.
@@ -62,6 +52,14 @@ export interface RoomView {
    * client views that person's page.
    */
   peerPlaylists: Record<PublicKeyHex, SharedPlaylist[]>;
+  /**
+   * How far the server's clock sits ahead of this machine's, in ms.
+   *
+   * Null until a snapshot has been folded in. Every playback position on
+   * screen is computed from the pointer against the server clock, so this is
+   * what makes a local `Date.now()` usable for reading one.
+   */
+  clockOffsetMs: number | null;
 }
 
 /** A server error, narrowed to what the UI needs to say about it. */
@@ -79,6 +77,7 @@ export const INITIAL_VIEW: RoomView = {
   status: { socket: "connecting", synced: false },
   lastError: null,
   peerPlaylists: {},
+  clockOffsetMs: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -136,22 +135,6 @@ export const ops = {
     roomId,
     ownerPubkey,
   }),
-  reportProgress: (
-    roomId: string,
-    sample: {
-      itemId: string;
-      positionMs: number;
-      durationMs: number;
-      sampledAtEpochMs: number;
-    },
-  ): Op => ({
-    type: "report-progress",
-    roomId,
-    itemId: sample.itemId,
-    positionMs: sample.positionMs,
-    durationMs: sample.durationMs,
-    sampledAtEpochMs: sample.sampledAtEpochMs,
-  }),
 } as const;
 
 /**
@@ -160,13 +143,26 @@ export const ops = {
  * Each gets a fresh id, so the same track can sit in a queue more than once and
  * still be addressed individually. Ownership is not carried: the envelope's key
  * is the author, and the server stamps `ownerPubkey` itself.
+ *
+ * A track's length is not in its link, so it is looked up. The server advances
+ * the pointer on durations alone, which is why `durationMs` is required and
+ * why a track whose length could not be resolved is dropped rather than sent
+ * as zero: a zero-length track would expire the instant it started.
  */
-export function toQueueItems(tracks: ParsedTrack[]): QueueItem[] {
-  return tracks.map((track) => ({
-    id: crypto.randomUUID(),
-    uri: track.uri,
-    trackId: track.trackId,
-  }));
+export function toQueueItems(tracks: DurationedTrack[]): QueueItem[] {
+  return tracks
+    .filter((track) => track.durationMs > 0)
+    .map((track) => ({
+      id: crypto.randomUUID(),
+      uri: track.uri,
+      trackId: track.trackId,
+      durationMs: track.durationMs,
+    }));
+}
+
+/** A parsed track whose length has been resolved. */
+export interface DurationedTrack extends ParsedTrack {
+  durationMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,14 +200,19 @@ export function parseServerEvent(raw: string): ServerEvent | null {
  * Pure and total: it returns the next view and never throws, so a surprising
  * frame cannot take the room down. An unchanged view is returned by identity,
  * which lets the shell skip a needless re-render.
+ *
+ * `localNow` is this machine's clock at the moment the frame arrived. It is
+ * passed in rather than read so this stays pure; only a `room-state` uses it,
+ * to fold the snapshot's `serverTime` into the clock offset.
  */
-export function reduce(view: RoomView, event: ServerEvent): RoomView {
+export function reduce(view: RoomView, event: ServerEvent, localNow: number): RoomView {
   switch (event.type) {
     case "room-state":
       return {
         ...view,
         snapshot: event.snapshot,
         status: { ...view.status, synced: true },
+        clockOffsetMs: foldOffset(view.clockOffsetMs, event.snapshot.serverTime, localNow),
         // A good snapshot means the room is working; a stale error would
         // otherwise sit in the UI forever.
         lastError: null,
@@ -330,9 +331,15 @@ export function pointerOf(view: RoomView): PlaybackPointer {
   return view.snapshot?.pointer ?? NULL_POINTER;
 }
 
-/** The broadcaster's newest sample, as relayed by the server. */
-export function progressOf(view: RoomView): Progress | null {
-  return view.snapshot?.progress ?? null;
+/**
+ * This instant in the server's clock.
+ *
+ * Before the first snapshot there is no offset to apply, so local time stands
+ * in. Nothing is playing then either — the pointer is null until a snapshot
+ * arrives — so nothing reads a position out of the guess.
+ */
+export function serverNowOf(view: RoomView, localNow: number): number {
+  return serverNow(view.clockOffsetMs ?? 0, localNow);
 }
 
 /**

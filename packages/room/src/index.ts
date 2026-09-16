@@ -34,27 +34,35 @@ export {
   participantsOf,
   peerPlaylistsOf,
   pointerOf,
-  progressOf,
   queueOf,
   queueToRestore,
   reduce,
   registerPayload,
+  serverNowOf,
   sessionQueueOf,
   toQueueItems,
   usernameOf,
 } from "./lib/room-client";
 export type {
   ConnectionStatus,
-  Progress,
+  DurationedTrack,
   RoomError,
   RoomView,
   SocketPhase,
 } from "./lib/room-client";
 
-// Progress.
+// The clock offset — reading a server-dated pointer with a local clock.
 
-export { displayedProgress, formatClock, trackProgressView, PLACEHOLDER_CLOCK } from "./lib/progress";
-export type { PlaybackProgress, TrackProgressView } from "./lib/progress";
+export { OFFSET_ALPHA, foldOffset, serverNow } from "./lib/clock-offset";
+
+// Minting queue items, which means resolving each track's length first.
+
+export { resolvePlaylistTracks, resolveQueueItems } from "./lib/enqueue";
+
+// The progress bar and its clocks.
+
+export { formatClock, trackProgressView, PLACEHOLDER_CLOCK } from "./lib/track-progress";
+export type { TrackProgressView } from "./lib/track-progress";
 
 // Spotify links.
 
@@ -102,7 +110,7 @@ export type { DropData } from "./lib/drop-links";
 // Services — the shell-supplied ports the room UI reads from context.
 
 export { RoomServicesProvider, useRoomServices } from "./services";
-export type { PlayerControlState, RoomServices } from "./services";
+export type { PlayerControl, PlayerControlState, RoomServices } from "./services";
 
 // Components.
 

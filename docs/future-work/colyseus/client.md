@@ -41,7 +41,7 @@ is `client.http.post("/register", sealedEnvelope)` during onboarding.
 Same name, same `implements Room`. Constructor takes the SDK `Room<JamState>`. It
 subscribes to `onStateChange`, `onDrop`, `onReconnect`, `onLeave` and `onError`. Each
 mutator is `room.send(...messages.x(...))`. `destroy()` is `room.leave(true)`, and it
-sends `unview-member` first if one is held. `myProgress` keeps its local stand-in.
+sends `unview-member` first if one is held.
 
 Room browser: `BrowseRooms` joins `LobbyRoom` and folds `"rooms"`, `"+"`, `"-"` into
 `RoomSummary[]`. `roomCode`, listener count and `trackUri` ride in `metadata` via

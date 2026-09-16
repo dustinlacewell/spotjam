@@ -35,9 +35,11 @@ export interface OpOutcome {
  * The caller has already established that `pubkey` is a member of `state`;
  * routing an op to the right room is the shell's job, not this one's.
  *
- * Every op that lands settles playback afterwards: the server, not a client,
- * decides when a room with a broadcaster and a queue starts playing. Doing it
- * here rather than per-op means no future op can forget to.
+ * Every op runs between two settlements. Before: the room is caught up to now,
+ * because nobody reports that a track ended and the op must land on the track
+ * that is really playing. After: the server, not a client, decides when a room
+ * with a broadcaster and a queue starts playing. Doing both here rather than
+ * per-op means no future op can forget to.
  */
 export function handleOp(
   state: RoomState,
@@ -47,7 +49,8 @@ export function handleOp(
 ): OpOutcome {
   if (!state.members.has(pubkey)) return { state, error: "not-in-room" };
 
-  const outcome = applyOp(state, pubkey, op, ctx);
+  const settled = Room.settle(state, ctx.now);
+  const outcome = applyOp(settled, pubkey, op, ctx);
   if (outcome.error !== undefined) return outcome;
   return { state: Room.settleStart(outcome.state, ctx.now) };
 }
@@ -110,27 +113,6 @@ function applyOp(
     case "skip":
       return { state: Room.advance(state, ctx.now) };
 
-    case "report-progress":
-      // The sample never moves the pointer -- the server still owns what plays
-      // and when it started. It is kept so listeners render the broadcaster's
-      // real position instead of extrapolating one of their own.
-      if (
-        !isNonEmptyString(op.itemId) ||
-        !isFinitePosition(op.positionMs) ||
-        !isFinitePosition(op.durationMs) ||
-        !isFinitePosition(op.sampledAtEpochMs)
-      ) {
-        return malformed(state);
-      }
-      return {
-        state: Room.reportProgress(state, pubkey, {
-          itemId: op.itemId,
-          positionMs: op.positionMs,
-          durationMs: op.durationMs,
-          sampledAtEpochMs: op.sampledAtEpochMs,
-        }),
-      };
-
     case "set-public-playlists": {
       if (!Array.isArray(op.playlists) || !op.playlists.every(isSharedPlaylist)) {
         return malformed(state);
@@ -157,20 +139,36 @@ function isFinitePosition(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+/**
+ * A real track length, in whole ms.
+ *
+ * The server advances the pointer on this number alone, so a missing, zero, or
+ * fractional one is not a cosmetic flaw: it would stall the room or leave the
+ * clock chasing a boundary it can never land on. Refuse it at the door.
+ */
+function isDuration(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 function isQueueItem(value: unknown): value is QueueItem {
   if (typeof value !== "object" || value === null) return false;
   const item = value as Record<string, unknown>;
   return (
     isNonEmptyString(item.id) &&
     isNonEmptyString(item.uri) &&
-    isNonEmptyString(item.trackId)
+    isNonEmptyString(item.trackId) &&
+    isDuration(item.durationMs)
   );
 }
 
 function isPlaylistTrack(value: unknown): value is PlaylistTrack {
   if (typeof value !== "object" || value === null) return false;
   const track = value as Record<string, unknown>;
-  return isNonEmptyString(track.uri) && isNonEmptyString(track.trackId);
+  return (
+    isNonEmptyString(track.uri) &&
+    isNonEmptyString(track.trackId) &&
+    isDuration(track.durationMs)
+  );
 }
 
 function isSharedPlaylist(value: unknown): value is SharedPlaylist {

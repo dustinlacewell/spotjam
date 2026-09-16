@@ -52,7 +52,6 @@ export {
   type SetPausedOp,
   type SeekOp,
   type SkipOp,
-  type ReportProgressOp,
   type PlaylistTrack,
   type SharedPlaylist,
   type SetPublicPlaylistsOp,
@@ -62,7 +61,6 @@ export {
 export {
   NULL_POINTER,
   type Participant,
-  type Progress,
   type SessionEntry,
   type PlaybackPointer,
   type RoomSnapshot,
@@ -76,6 +74,8 @@ export {
   type ServerEvent,
   type ServerEventType,
 } from "./events.js";
+
+export { endsAt, positionAt, settleOnce } from "./pointer.js";
 
 export { appendUniqueTracks, moveMany, type HasTrackId, type HasId } from "./tracks.js";
 

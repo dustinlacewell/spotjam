@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Mark, Pill, StatusDot, type StatusDotTone } from "@spotjam/ui";
-import type {
-  Participant,
-  PlaybackPointer,
-  QueueItem,
-  SessionEntry,
-  SharedPlaylist,
+import {
+  positionAt,
+  settleOnce,
+  type Participant,
+  type PlaybackPointer,
+  type PlaylistTrack,
+  type QueueItem,
+  type SessionEntry,
+  type SharedPlaylist,
 } from "@spotjam/protocol";
 import type { Playlist } from "../lib/playlists";
 import type { ConnectionStatus } from "../lib/room-client";
 import type { Room } from "../ports/room";
 import type { ImportedPlaylist } from "../ports/playlist-service";
-import { toQueueItems } from "../lib/room-client";
+import { resolvePlaylistTracks, resolveQueueItems } from "../lib/enqueue";
 import { rowsOfTracks, toSharedPlaylists, type PlaylistRow } from "../lib/playlists";
-import { displayedProgress } from "../lib/progress";
 import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import { useRoomServices } from "../services";
 import { usePlaylists } from "./use-playlists";
@@ -39,13 +41,15 @@ export function QueueView({
   roomId: string;
   onLeave: () => void;
 }) {
-  const { status, participants, sessionQueue, pointer, myProgress, myQueue, queueOf, error } =
+  const { status, participants, sessionQueue, pointer, myQueue, queueOf, error } =
     useRoomSnapshot(room);
-  const { playlistService } = useRoomServices();
+  const { playlistService, trackMetadata } = useRoomServices();
   const playlistsApi = usePlaylists(playlistService);
   const [selection, setSelection] = useState<Selection>("session");
   const [pane, setPane] = useState<PaneSelection>(QUEUE_PANE);
-  const now = useNowTicker(pointer.itemId !== null);
+  // A tick, not a time: the clock that matters is the server's, which the room
+  // reads for us. This only says "re-read it now".
+  useTicker(pointer.itemId !== null);
 
   const { createWithTracks } = playlistsApi;
   const myPubkey = room.myPubkey;
@@ -115,9 +119,18 @@ export function QueueView({
   }, [room, selection, myPubkey, synced, revisionOfSelected]);
 
   const broadcasting = room.isBroadcasting();
-  const ownerName = nameOf(participants, pointer.ownerPubkey);
-  const currentItem = currentItemOf(pointer);
-  const progress = displayedProgress(pointer, myProgress, now);
+
+  // The server advances the pointer on its own clock, and its snapshots arrive
+  // in bursts. Between two of them a track can run out, so the pointer is
+  // settled forward one step here before it is read: the bar rolls onto the
+  // next track on time rather than sticking at the end of the last one until
+  // the next snapshot lands. This is a view of the pointer, not a decision —
+  // the server still owns what actually plays.
+  const serverNow = room.serverNow();
+  const settled = settleOnce(pointer, sessionQueue[0] ?? null, serverNow);
+  const ownerName = nameOf(participants, settled.ownerPubkey);
+  const currentItem = currentItemOf(settled);
+  const positionMs = settled.itemId === null ? null : positionAt(settled, serverNow);
 
   const queueSource = queueSourceOf(selection, {
     myPubkey,
@@ -129,8 +142,18 @@ export function QueueView({
     playlistsFor: (pubkey) => room.playlistsOf(pubkey),
   });
 
+  /**
+   * A link says which track, never how long it runs, and a queue item must
+   * carry its length. So the lookup happens first and the enqueue follows it.
+   * A track whose length will not resolve is dropped rather than queued at
+   * zero, which the server would run out instantly.
+   */
   function appendTracks(tracks: ParsedTrack[]) {
-    room.appendToMyQueue(toQueueItems(tracks));
+    void resolveQueueItems(trackMetadata, tracks).then((items) => room.appendToMyQueue(items));
+  }
+
+  function replaceTracks(tracks: ParsedTrack[]) {
+    void resolveQueueItems(trackMetadata, tracks).then((items) => room.replaceMyQueue(items));
   }
 
   /**
@@ -200,8 +223,9 @@ export function QueueView({
           <NowPlaying
             item={currentItem}
             ownerName={ownerName}
-            progress={progress}
-            isPaused={pointer.isPaused}
+            positionMs={positionMs}
+            durationMs={settled.durationMs}
+            isPaused={settled.isPaused}
             onTogglePause={() => room.setPaused(!pointer.isPaused)}
             onSkip={() => room.skip()}
             onSeek={(ms) => room.seekTo(ms)}
@@ -227,9 +251,19 @@ export function QueueView({
               selected={pane}
               onSelect={setPane}
               onAddToQueue={appendTracks}
-              onReplaceQueue={(tracks) => room.replaceMyQueue(toQueueItems(tracks))}
+              onReplaceQueue={replaceTracks}
               onQueueLinks={(links) => handleLinks(links, appendTracks, importIntoQueue)}
-              onLinks={(links, onTracks) => handleLinks(links, onTracks, setPendingImport)}
+              onLinks={(links, onTracks) =>
+                handleLinks(
+                  links,
+                  // A link dropped into a playlist carries no length either,
+                  // and a playlist is a place tracks get queued from — so the
+                  // same lookup runs here before the rows are made.
+                  (tracks) =>
+                    void resolvePlaylistTracks(trackMetadata, tracks).then(onTracks),
+                  setPendingImport,
+                )
+              }
               onLinkPlaylist={() => setLinkOpen(true)}
               onImportPlaylists={setPendingImport}
               onMoveMany={(itemIds, beforeItemId) => room.moveManyInMyQueue(itemIds, beforeItemId)}
@@ -383,23 +417,26 @@ function messageOf(error: unknown): string {
   return String(error);
 }
 
-/** The track references out of a fetched playlist's rows. */
-function tracksOfRows(rows: PlaylistRow[]): ParsedTrack[] {
+/** The track references out of a fetched playlist's rows, lengths and all. */
+function tracksOfRows(rows: PlaylistRow[]): PlaylistTrack[] {
   return rows.map((row) => row.track);
 }
 
-/** Wall clock, resampled every 500ms, but only while something is playing. */
-function useNowTicker(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
+/**
+ * Re-renders every 500ms while something plays, so the clock and bar move.
+ *
+ * It carries no time of its own. The position is read from the pointer against
+ * the server's clock at render, which is the only clock the pointer is dated
+ * in; a local timestamp held here would be the wrong frame.
+ */
+function useTicker(active: boolean): void {
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     if (!active) return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 500);
+    const id = setInterval(() => setTick((n) => n + 1), 500);
     return () => clearInterval(id);
   }, [active]);
-
-  return now;
 }
 
 /** The playing track lives in the pointer, not in any queue — rebuild a card-shaped view of it. */
@@ -409,6 +446,7 @@ function currentItemOf(pointer: PlaybackPointer): QueueItem | null {
     id: pointer.itemId,
     uri: pointer.uri,
     trackId: pointer.uri.replace("spotify:track:", ""),
+    durationMs: pointer.durationMs,
   };
 }
 

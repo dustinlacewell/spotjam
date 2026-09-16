@@ -13,6 +13,8 @@ export interface QueueItem {
   /** spotify:track:... */
   uri: string;
   trackId: string;
+  /** Track length in ms, from the signed-in client. Required, > 0. */
+  durationMs: number;
 }
 
 export interface JoinRoomOp {
@@ -91,28 +93,12 @@ export interface SkipOp {
   roomId: string;
 }
 
-/**
- * Report where the local player actually sits.
- *
- * This is how a listener's progress bar tracks the broadcaster's real playback
- * rather than a local guess: the broadcaster samples Spotify, the server keeps
- * the newest sample, and it rides back out in every snapshot. `itemId` scopes
- * the sample to one track so a stale one cannot bleed across an advance.
- */
-export interface ReportProgressOp {
-  type: "report-progress";
-  roomId: string;
-  itemId: string;
-  positionMs: number;
-  durationMs: number;
-  /** Sender's clock when the sample was taken; receivers extrapolate from it. */
-  sampledAtEpochMs: number;
-}
-
 /** One track inside a shared playlist. No queue identity; that is minted on enqueue. */
 export interface PlaylistTrack {
   uri: string;
   trackId: string;
+  /** Track length in ms, from the signed-in client. Required, > 0. */
+  durationMs: number;
 }
 
 /** A playlist as its owner shows it to the room. */
@@ -149,7 +135,6 @@ export type Op =
   | SetPausedOp
   | SeekOp
   | SkipOp
-  | ReportProgressOp
   | SetPublicPlaylistsOp
   | ViewPlaylistsOp;
 
@@ -168,7 +153,6 @@ const OP_TYPES: ReadonlySet<string> = new Set<OpType>([
   "set-paused",
   "seek",
   "skip",
-  "report-progress",
   "set-public-playlists",
   "view-playlists",
 ]);

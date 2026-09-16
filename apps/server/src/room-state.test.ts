@@ -1,4 +1,9 @@
-import { NULL_POINTER, type QueueItem, type SharedPlaylist } from "@spotjam/protocol";
+import {
+  NULL_POINTER,
+  settleOnce,
+  type QueueItem,
+  type SharedPlaylist,
+} from "@spotjam/protocol";
 import { describe, expect, it } from "vitest";
 
 import * as Room from "./room-state.ts";
@@ -10,9 +15,10 @@ const BOB = "b".repeat(64);
 const CAROL = "c".repeat(64);
 
 const NOW = 1_700_000_000_000;
+const MINUTE = 60_000;
 
-function track(id: string): QueueItem {
-  return { id, uri: `spotify:track:${id}`, trackId: id };
+function track(id: string, durationMs = 3 * MINUTE): QueueItem {
+  return { id, uri: `spotify:track:${id}`, trackId: id, durationMs };
 }
 
 function roomWith(...people: Array<[string, string]>): RoomState {
@@ -100,7 +106,12 @@ describe("queue operations", () => {
   });
 
   it("drops a fresh item for a track the queue already holds, keeping the existing one", () => {
-    const again: QueueItem = { id: "later", uri: "spotify:track:t1", trackId: "t1" };
+    const again: QueueItem = {
+      id: "later",
+      uri: "spotify:track:t1",
+      trackId: "t1",
+      durationMs: 3 * MINUTE,
+    };
     let state = roomWith([ALICE, "alice"]);
     state = Room.enqueue(state, ALICE, [track("t1")]);
     state = Room.enqueue(state, ALICE, [again, track("t2")]);
@@ -210,6 +221,7 @@ describe("advance", () => {
       uri: "spotify:track:t1",
       startedAtEpochMs: NOW,
       isPaused: false,
+      durationMs: 3 * MINUTE,
     });
     expect(ids(state, ALICE)).toEqual(["t2"]);
   });
@@ -393,67 +405,105 @@ describe("transport", () => {
     state = Room.seek(state, 42_000, NOW + 2_000);
     expect(state.pointer).toMatchObject({ isPaused: true, pausedAtOffsetMs: 42_000 });
   });
+
+  it("clamps a seek past the end to the track's length", () => {
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.setBroadcasting(state, ALICE, true);
+    state = Room.enqueue(state, ALICE, [track("t1")]);
+    state = Room.advance(state, NOW);
+    state = Room.setPaused(state, true, NOW + 1_000);
+
+    // A paused pointer parked past its own duration reads as a track that ran
+    // out but never advances, and the room wedges on it.
+    state = Room.seek(state, 99 * MINUTE, NOW + 2_000);
+    expect(state.pointer.pausedAtOffsetMs).toBe(3 * MINUTE);
+  });
+
+  it("clamps a seek past the end while playing", () => {
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.setBroadcasting(state, ALICE, true);
+    state = Room.enqueue(state, ALICE, [track("t1")]);
+    state = Room.advance(state, NOW);
+
+    state = Room.seek(state, 99 * MINUTE, NOW + 1_000);
+    expect(state.pointer.startedAtEpochMs).toBe(NOW + 1_000 - 3 * MINUTE);
+  });
+
+  it("clamps a negative seek to the top of the track", () => {
+    let state = roomWith([ALICE, "alice"]);
+    state = Room.setBroadcasting(state, ALICE, true);
+    state = Room.enqueue(state, ALICE, [track("t1")]);
+    state = Room.advance(state, NOW);
+    state = Room.setPaused(state, true, NOW + 1_000);
+
+    state = Room.seek(state, -5_000, NOW + 2_000);
+    expect(state.pointer.pausedAtOffsetMs).toBe(0);
+  });
 });
 
-describe("progress", () => {
-  /** A room where Alice is broadcasting and her first track is playing. */
-  function playing(): RoomState {
+describe("settle", () => {
+  /** A room where Alice is broadcasting and her queue is playing from NOW. */
+  function playing(...durations: number[]): RoomState {
     let state = roomWith([ALICE, "alice"], [BOB, "bob"]);
     state = Room.setBroadcasting(state, ALICE, true);
-    state = Room.enqueue(state, ALICE, [track("a1"), track("a2")]);
+    state = Room.enqueue(
+      state,
+      ALICE,
+      durations.map((ms, i) => track(`a${i + 1}`, ms)),
+    );
     return Room.advance(state, NOW);
   }
 
-  function sample(itemId: string, positionMs: number) {
-    return { itemId, positionMs, durationMs: 200_000, sampledAtEpochMs: NOW };
-  }
-
-  it("keeps a sample for the track the pointer names", () => {
-    const state = Room.reportProgress(playing(), ALICE, sample("a1", 12_000));
-    expect(state.members.get(ALICE)?.progress).toEqual(sample("a1", 12_000));
+  it("changes nothing before the track ends", () => {
+    const state = playing(MINUTE, MINUTE);
+    expect(Room.settle(state, NOW + MINUTE - 1)).toBe(state);
   });
 
-  it("ignores a sample for any other track", () => {
-    // A sample that arrives just after an advance describes the old track;
-    // keeping it would draw a bar for music nobody is playing.
-    const state = Room.reportProgress(playing(), ALICE, sample("a2", 500));
-    expect(state.members.get(ALICE)?.progress).toBeNull();
+  it("does nothing to an empty pointer", () => {
+    const state = roomWith([ALICE, "alice"]);
+    expect(Room.settle(state, NOW + 10 * MINUTE)).toBe(state);
   });
 
-  it("drops every sample when the pointer moves on", () => {
-    let state = Room.reportProgress(playing(), ALICE, sample("a1", 12_000));
-    state = Room.advance(state, NOW + 1000);
+  it("advances at exactly the end, starting the next track at the old end", () => {
+    const state = Room.settle(playing(MINUTE, MINUTE), NOW + MINUTE);
 
-    expect(state.pointer.itemId).toBe("a2");
-    expect(state.members.get(ALICE)?.progress).toBeNull();
+    expect(state.pointer).toMatchObject({
+      itemId: "a2",
+      startedAtEpochMs: NOW + MINUTE,
+      isPaused: false,
+      durationMs: MINUTE,
+    });
   });
 
-  it("drops samples when the last broadcaster stops", () => {
-    let state = Room.reportProgress(playing(), ALICE, sample("a1", 12_000));
-    state = Room.setBroadcasting(state, ALICE, false);
+  it("crosses two short tracks in one call", () => {
+    // Nobody is listening at 3am; the room must not need one call per track.
+    const state = Room.settle(playing(1_000, 1_000, 5 * MINUTE), NOW + 2_500);
 
-    expect(state.pointer).toEqual(NULL_POINTER);
-    expect(state.members.get(ALICE)?.progress).toBeNull();
+    expect(state.pointer).toMatchObject({
+      itemId: "a3",
+      // Each boundary is exact, so the overshoot never accumulates.
+      startedAtEpochMs: NOW + 2_000,
+    });
   });
 
-  it("projects the sample of whoever is feeding the current track", () => {
-    const state = Room.reportProgress(playing(), ALICE, sample("a1", 12_000));
-
-    // Bob is a listener: he sees Alice's position, which is what the room hears.
-    expect(Room.projectSnapshot(state, BOB, NOW).progress).toEqual(
-      sample("a1", 12_000),
-    );
+  it("clears the pointer once the queue runs out", () => {
+    expect(Room.settle(playing(MINUTE), NOW + 10 * MINUTE).pointer).toEqual(NULL_POINTER);
   });
 
-  it("ignores a sample from someone who is not feeding the track", () => {
-    let state = playing();
-    state = Room.reportProgress(state, BOB, sample("a1", 999));
-
-    expect(Room.projectSnapshot(state, ALICE, NOW).progress).toBeNull();
+  it("never settles a paused pointer", () => {
+    const paused = Room.setPaused(playing(MINUTE, MINUTE), true, NOW + 1_000);
+    expect(Room.settle(paused, NOW + 10 * MINUTE)).toBe(paused);
   });
 
-  it("projects no sample before anyone has reported one", () => {
-    expect(Room.projectSnapshot(playing(), ALICE, NOW).progress).toBeNull();
+  it("agrees with the client's one-step prediction", () => {
+    // The client extrapolates with settleOnce over the projected queue. If the
+    // two ever disagree, a listener's screen lies until the next snapshot.
+    const state = playing(MINUTE, 2 * MINUTE, 3 * MINUTE);
+    const now = NOW + MINUTE + 1;
+    const head = Room.projectSnapshot(state, BOB, NOW).sessionQueue[0];
+    if (head === undefined) throw new Error("expected a projected next track");
+
+    expect(settleOnce(state.pointer, head, now)).toEqual(Room.settle(state, now).pointer);
   });
 });
 
@@ -461,7 +511,7 @@ describe("public playlists", () => {
   const mix: SharedPlaylist = {
     id: "p1",
     name: "Morning",
-    tracks: [{ uri: "spotify:track:a1", trackId: "a1" }],
+    tracks: [{ uri: "spotify:track:a1", trackId: "a1", durationMs: 3 * MINUTE }],
   };
 
   it("reads back what a member set", () => {
@@ -550,7 +600,6 @@ describe("public playlists", () => {
       "myQueue",
       "participants",
       "pointer",
-      "progress",
       "roomId",
       "serverTime",
       "sessionQueue",

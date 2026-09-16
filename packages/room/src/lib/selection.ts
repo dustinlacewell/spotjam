@@ -71,7 +71,11 @@ export function pruneSelection(sel: Selection, liveIds: readonly string[]): Sele
 
 /** Queue rows carry a queue identity the playlist ops have no use for. */
 export function toPlaylistTracks(items: readonly QueueItem[]): PlaylistTrack[] {
-  return items.map((item) => ({ uri: item.uri, trackId: item.trackId }));
+  return items.map((item) => ({
+    uri: item.uri,
+    trackId: item.trackId,
+    durationMs: item.durationMs,
+  }));
 }
 
 /** The named rows, as playlist tracks, in the list's own order. */

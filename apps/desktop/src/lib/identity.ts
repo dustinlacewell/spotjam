@@ -7,7 +7,7 @@ import {
   type SignatureHex,
 } from "@spotjam/protocol";
 
-/** Matches the injected-invoke seam used by SyncDriver. */
+/** Matches the injected-invoke seam used by PlaybackDriver. */
 type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
 /** What the app knows about the local user once onboarding has run. */

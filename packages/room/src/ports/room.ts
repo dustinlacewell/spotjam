@@ -7,7 +7,6 @@
 import type {
   Participant,
   PlaybackPointer,
-  Progress,
   PublicKeyHex,
   QueueItem,
   SessionEntry,
@@ -39,7 +38,15 @@ export interface Room {
   myQueue(): QueueItem[];
   queueOf(pubkey: PublicKeyHex): QueueItem[];
   getPlaybackPointer(): PlaybackPointer;
-  myProgress(): Progress | null;
+  /**
+   * This instant, in the server's clock.
+   *
+   * The server advances the pointer on its own clock, so every position read
+   * out of a pointer must be read against this rather than `Date.now()`.
+   * Before the first snapshot there is no offset to apply and local time
+   * stands in — nothing is playing then, so nothing reads a position.
+   */
+  serverNow(): number;
   lastError(): RoomError | null;
   isBroadcasting(): boolean;
 

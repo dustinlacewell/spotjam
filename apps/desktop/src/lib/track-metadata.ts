@@ -5,10 +5,15 @@ import { createBatchLookup } from "./batch-lookup";
 /** The desktop app's name for the port's TrackInfo. */
 export type TrackMetadata = TrackInfo;
 
+/**
+ * What `spotify_fetch_tracks` returns per id. Serde leaves these snake_case,
+ * so the field names differ from the port's and are mapped rather than spread.
+ */
 interface RustTrackMetadata {
   title: string;
   artist: string;
   thumbnail_url: string | null;
+  duration_ms: number;
 }
 
 /** Keeps one metadata request a comfortable size; the Rust side chunks too. */
@@ -25,7 +30,14 @@ async function fetchTracks(trackIds: string[]): Promise<(TrackMetadata | null)[]
   try {
     const results = await invoke<(RustTrackMetadata | null)[]>("spotify_fetch_tracks", { trackIds });
     return results.map((data) =>
-      data ? { title: data.title, artist: data.artist, thumbnailUrl: data.thumbnail_url } : null,
+      data
+        ? {
+            title: data.title,
+            artist: data.artist,
+            thumbnailUrl: data.thumbnail_url,
+            durationMs: data.duration_ms,
+          }
+        : null,
     );
   } catch (error) {
     console.warn("spotjam: spotify_fetch_tracks failed:", error);

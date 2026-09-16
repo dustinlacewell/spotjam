@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   NULL_POINTER,
+  type QueueItem,
   type RoomSnapshot,
   type ServerEvent,
   type SharedPlaylist,
@@ -21,6 +22,7 @@ import {
   queueToRestore,
   reduce,
   registerPayload,
+  serverNowOf,
   sessionQueueOf,
   toQueueItems,
   usernameOf,
@@ -47,8 +49,13 @@ function snapshot(overrides: Partial<RoomSnapshot> = {}): RoomSnapshot {
   };
 }
 
+/** A queue item. Every one carries a length; nothing here cares which. */
+function item(id: string): QueueItem {
+  return { id, uri: `u${id}`, trackId: id, durationMs: 200_000 };
+}
+
 function viewOf(snap: RoomSnapshot): RoomView {
-  return reduce(INITIAL_VIEW, { type: "room-state", snapshot: snap });
+  return reduce(INITIAL_VIEW, { type: "room-state", snapshot: snap }, EPOCH);
 }
 
 describe("outgoing payloads", () => {
@@ -82,26 +89,6 @@ describe("outgoing payloads", () => {
     expect(ops.seek(ROOM, -50)).toEqual({ type: "seek", roomId: ROOM, positionMs: 0 });
   });
 
-  it("carries the whole progress sample, not just a position", () => {
-    // Listeners need all four fields: the item to scope the sample, the
-    // duration to size the bar, and the sample time to extrapolate from.
-    expect(
-      ops.reportProgress(ROOM, {
-        itemId: "i1",
-        positionMs: 99,
-        durationMs: 200_000,
-        sampledAtEpochMs: EPOCH,
-      }),
-    ).toEqual({
-      type: "report-progress",
-      roomId: ROOM,
-      itemId: "i1",
-      positionMs: 99,
-      durationMs: 200_000,
-      sampledAtEpochMs: EPOCH,
-    });
-  });
-
   it("greets with hello and registers with a username", () => {
     expect(helloPayload()).toEqual({ type: "hello" });
     expect(registerPayload("alice")).toEqual({ type: "register", username: "alice" });
@@ -109,8 +96,8 @@ describe("outgoing payloads", () => {
 
   it("mints a fresh id per track and carries no owner", () => {
     const items = toQueueItems([
-      { uri: "spotify:track:x", trackId: "x" },
-      { uri: "spotify:track:x", trackId: "x" },
+      { uri: "spotify:track:x", trackId: "x", durationMs: 200_000 },
+      { uri: "spotify:track:x", trackId: "x", durationMs: 200_000 },
     ]);
 
     expect(items).toHaveLength(2);
@@ -119,7 +106,23 @@ describe("outgoing payloads", () => {
       id: items[0].id,
       uri: "spotify:track:x",
       trackId: "x",
+      durationMs: 200_000,
     });
+  });
+
+  /**
+   * The server advances the pointer on durations alone, so a zero-length item
+   * would start and end in the same tick and take the rest of the queue with
+   * it. Dropping it is the safe direction.
+   */
+  it("drops a track whose length is unknown rather than queueing it at zero", () => {
+    const items = toQueueItems([
+      { uri: "spotify:track:x", trackId: "x", durationMs: 0 },
+      { uri: "spotify:track:y", trackId: "y", durationMs: -1 },
+      { uri: "spotify:track:z", trackId: "z", durationMs: 1000 },
+    ]);
+
+    expect(items.map((item) => item.trackId)).toEqual(["z"]);
   });
 });
 
@@ -138,37 +141,72 @@ describe("parseServerEvent", () => {
 
 describe("reduce", () => {
   it("stores a snapshot and marks the room synced", () => {
-    const view = viewOf(snapshot({ myQueue: [{ id: "i1", uri: "u", trackId: "t" }] }));
+    const view = viewOf(snapshot({ myQueue: [item("i1")] }));
 
     expect(view.status.synced).toBe(true);
-    expect(myQueueOf(view)).toEqual([{ id: "i1", uri: "u", trackId: "t" }]);
+    expect(myQueueOf(view)).toEqual([item("i1")]);
+  });
+
+  it("folds the snapshot's server time into the clock offset", () => {
+    // The server is 5s ahead of this machine.
+    const view = reduce(
+      INITIAL_VIEW,
+      { type: "room-state", snapshot: snapshot({ serverTime: EPOCH + 5_000 }) },
+      EPOCH,
+    );
+
+    expect(view.clockOffsetMs).toBe(5_000);
+    expect(serverNowOf(view, EPOCH)).toBe(EPOCH + 5_000);
+  });
+
+  it("blends a later server time rather than swapping to it", () => {
+    // One late frame must not yank the bar; the offset moves a step at a time.
+    const first = reduce(
+      INITIAL_VIEW,
+      { type: "room-state", snapshot: snapshot({ serverTime: EPOCH }) },
+      EPOCH,
+    );
+    const second = reduce(
+      first,
+      { type: "room-state", snapshot: snapshot({ serverTime: EPOCH + 1_000 }) },
+      EPOCH,
+    );
+
+    expect(first.clockOffsetMs).toBe(0);
+    expect(second.clockOffsetMs).toBeGreaterThan(0);
+    expect(second.clockOffsetMs).toBeLessThan(1_000);
+  });
+
+  it("reads local time as server time before any snapshot has landed", () => {
+    expect(INITIAL_VIEW.clockOffsetMs).toBeNull();
+    expect(serverNowOf(INITIAL_VIEW, EPOCH)).toBe(EPOCH);
   });
 
   it("keeps a typed error, with copy for the user", () => {
-    const view = reduce(INITIAL_VIEW, {
-      type: "error",
-      code: "stale-envelope",
-      message: "Envelope rejected: stale-timestamp.",
-    });
+    const view = reduce(
+      INITIAL_VIEW,
+      { type: "error", code: "stale-envelope", message: "Envelope rejected: stale-timestamp." },
+      EPOCH,
+    );
 
     expect(view.lastError?.code).toBe("stale-envelope");
     expect(view.lastError?.humanMessage).toMatch(/clock/i);
   });
 
   it("clears a stale error once a snapshot arrives", () => {
-    const errored = reduce(INITIAL_VIEW, {
-      type: "error",
-      code: "internal",
-      message: "boom",
-    });
-    const recovered = reduce(errored, { type: "room-state", snapshot: snapshot() });
+    const errored = reduce(
+      INITIAL_VIEW,
+      { type: "error", code: "internal", message: "boom" },
+      EPOCH,
+    );
+    const recovered = reduce(errored, { type: "room-state", snapshot: snapshot() }, EPOCH);
 
     expect(recovered.lastError).toBeNull();
   });
 
   it("leaves the view untouched for a registered event", () => {
     const event: ServerEvent = { type: "registered", pubkey: ME, username: "alice" };
-    expect(reduce(INITIAL_VIEW, event)).toBe(INITIAL_VIEW);
+    expect(reduce(INITIAL_VIEW, event, EPOCH)).toBe(INITIAL_VIEW);
   });
 
   it("describes every error code without throwing", () => {
@@ -216,21 +254,21 @@ describe("reading the view", () => {
   });
 
   it("reads my own queue from the snapshot", () => {
-    const mine = [{ id: "i1", uri: "u", trackId: "t" }];
+    const mine = [item("i1")];
     const view = viewOf(snapshot({ myQueue: mine }));
 
     expect(queueOf(view, ME, ME)).toEqual(mine);
   });
 
   it("recovers a peer's queue in order from the interleaved session queue", () => {
-    const b1 = { id: "b1", uri: "ub1", trackId: "b1" };
-    const b2 = { id: "b2", uri: "ub2", trackId: "b2" };
+    const b1 = item("b1");
+    const b2 = item("b2");
     const view = viewOf(
       snapshot({
         sessionQueue: [
-          { item: { id: "a1", uri: "ua1", trackId: "a1" }, ownerPubkey: ME, ownerName: "alice" },
+          { item: item("a1"), ownerPubkey: ME, ownerName: "alice" },
           { item: b1, ownerPubkey: THEM, ownerName: "bob" },
-          { item: { id: "a2", uri: "ua2", trackId: "a2" }, ownerPubkey: ME, ownerName: "alice" },
+          { item: item("a2"), ownerPubkey: ME, ownerName: "alice" },
           { item: b2, ownerPubkey: THEM, ownerName: "bob" },
         ],
       }),
@@ -242,9 +280,7 @@ describe("reading the view", () => {
   it("shows a peer with no session entries as empty", () => {
     const view = viewOf(
       snapshot({
-        sessionQueue: [
-          { item: { id: "a1", uri: "ua1", trackId: "a1" }, ownerPubkey: ME, ownerName: "alice" },
-        ],
+        sessionQueue: [{ item: item("a1"), ownerPubkey: ME, ownerName: "alice" }],
       }),
     );
 
@@ -298,15 +334,15 @@ describe("shared playlists", () => {
   });
 
   it("folds a playlists event in under its owner", () => {
-    const view = reduce(INITIAL_VIEW, playlistsEvent(THEM, [MORNING]));
+    const view = reduce(INITIAL_VIEW, playlistsEvent(THEM, [MORNING]), EPOCH);
     expect(peerPlaylistsOf(view, THEM)).toEqual([MORNING]);
     expect(peerPlaylistsOf(view, ME)).toEqual([]);
   });
 
   it("replaces one owner's set without touching another's", () => {
-    const first = reduce(INITIAL_VIEW, playlistsEvent(THEM, [MORNING]));
-    const second = reduce(first, playlistsEvent(ME, [EVENING]));
-    const third = reduce(second, playlistsEvent(THEM, []));
+    const first = reduce(INITIAL_VIEW, playlistsEvent(THEM, [MORNING]), EPOCH);
+    const second = reduce(first, playlistsEvent(ME, [EVENING]), EPOCH);
+    const third = reduce(second, playlistsEvent(THEM, []), EPOCH);
 
     expect(peerPlaylistsOf(third, THEM)).toEqual([]);
     expect(peerPlaylistsOf(third, ME)).toEqual([EVENING]);
@@ -314,24 +350,28 @@ describe("shared playlists", () => {
 
   it("leaves the snapshot and the error alone", () => {
     const view = viewOf(snapshot());
-    const next = reduce(view, playlistsEvent(THEM, [MORNING]));
+    const next = reduce(view, playlistsEvent(THEM, [MORNING]), EPOCH);
     expect(next.snapshot).toBe(view.snapshot);
     expect(next.lastError).toBe(view.lastError);
   });
 
   it("drops a cached set when its owner is gone from the snapshot", () => {
     let view = viewOf(snapshot());
-    view = reduce(view, playlistsEvent(THEM, [MORNING]));
-    view = reduce(view, playlistsEvent(ME, [EVENING]));
+    view = reduce(view, playlistsEvent(THEM, [MORNING]), EPOCH);
+    view = reduce(view, playlistsEvent(ME, [EVENING]), EPOCH);
 
-    const alone = reduce(view, {
-      type: "room-state",
-      snapshot: snapshot({
-        participants: [
-          { pubkey: ME, username: "alice", broadcasting: true, playlistsRevision: 0 },
-        ],
-      }),
-    });
+    const alone = reduce(
+      view,
+      {
+        type: "room-state",
+        snapshot: snapshot({
+          participants: [
+            { pubkey: ME, username: "alice", broadcasting: true, playlistsRevision: 0 },
+          ],
+        }),
+      },
+      EPOCH,
+    );
 
     // A rejoiner starts the server's copy empty, so a kept copy would be stale.
     expect(peerPlaylistsOf(alone, THEM)).toEqual([]);
@@ -340,9 +380,9 @@ describe("shared playlists", () => {
 
   it("keeps the cache object identical when everyone is still present", () => {
     let view = viewOf(snapshot());
-    view = reduce(view, playlistsEvent(THEM, [MORNING]));
+    view = reduce(view, playlistsEvent(THEM, [MORNING]), EPOCH);
 
-    const next = reduce(view, { type: "room-state", snapshot: snapshot() });
+    const next = reduce(view, { type: "room-state", snapshot: snapshot() }, EPOCH);
     expect(next.peerPlaylists).toBe(view.peerPlaylists);
   });
 });

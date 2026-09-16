@@ -1,7 +1,7 @@
 import { Pause, Play, SkipForward } from "lucide-react";
 import { IconButton, ProgressBar, Thumbnail } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
-import { trackProgressView, type PlaybackProgress } from "../lib/progress";
+import { trackProgressView } from "../lib/track-progress";
 import { toPlaylistTracks } from "../lib/selection";
 import { TrackContextMenu } from "./TrackContextMenu";
 import { useTrackContextMenu } from "./use-track-context-menu";
@@ -11,7 +11,8 @@ import styles from "./NowPlaying.module.css";
 export function NowPlaying({
   item,
   ownerName,
-  progress,
+  positionMs,
+  durationMs,
   isPaused,
   onTogglePause,
   onSkip,
@@ -20,7 +21,10 @@ export function NowPlaying({
   /** The playing track, or null when nothing is. */
   item: QueueItem | null;
   ownerName: string;
-  progress: PlaybackProgress | null;
+  /** Where the track sits, on the server's clock. Null when nothing plays. */
+  positionMs: number | null;
+  /** The playing track's length. 0 when it is not known. */
+  durationMs: number;
   isPaused: boolean;
   onTogglePause: () => void;
   onSkip: () => void;
@@ -57,7 +61,7 @@ export function NowPlaying({
         </div>
         <p className={styles.title}>{metadata?.title ?? item.trackId}</p>
         <p className={styles.artist}>{metadata?.artist ?? " "}</p>
-        <TrackProgress progress={progress} onSeek={onSeek} />
+        <TrackProgress positionMs={positionMs} durationMs={durationMs} onSeek={onSeek} />
       </div>
       <div className={styles.controls}>
         <IconButton
@@ -98,14 +102,16 @@ const ARROW_STEP_MS = 5000;
  * since it needs the measured length the view has already folded away.
  */
 function TrackProgress({
-  progress,
+  positionMs,
+  durationMs,
   onSeek,
 }: {
-  progress: PlaybackProgress | null;
+  positionMs: number | null;
+  durationMs: number;
   onSeek: (positionMs: number) => void;
 }) {
-  const view = trackProgressView(progress);
-  const durationMs = view.seekable && progress?.kind === "measured" ? progress.durationMs : null;
+  const view = trackProgressView(positionMs, durationMs);
+  const seekableMs = view.seekable ? durationMs : null;
 
   return (
     <div className={styles.progress}>
@@ -117,13 +123,13 @@ function TrackProgress({
       */}
       <ProgressBar
         fraction={view.fraction}
-        seekable={durationMs !== null}
+        seekable={seekableMs !== null}
         onSeek={
-          durationMs !== null
-            ? (nextFraction) => onSeek(fractionToMsWithStep(nextFraction, view.fraction, durationMs))
+          seekableMs !== null
+            ? (nextFraction) => onSeek(fractionToMsWithStep(nextFraction, view.fraction, seekableMs))
             : undefined
         }
-        aria-label={durationMs !== null ? "Seek" : undefined}
+        aria-label={seekableMs !== null ? "Seek" : undefined}
       />
       <div className={styles.progressClocks}>
         <span>{view.elapsedText}</span>

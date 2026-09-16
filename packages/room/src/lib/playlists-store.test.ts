@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadPlaylists, savePlaylists } from "./playlists-store";
 
 const KEY = "spotjam.playlists";
-const TRACK = { uri: "spotify:track:aaaa1111", trackId: "aaaa1111" };
+const TRACK = { uri: "spotify:track:aaaa1111", trackId: "aaaa1111", durationMs: 180_000 };
 const ROW = { track: TRACK };
 
 /** The store reads a global `localStorage`; node has none, so stand one up. */
@@ -116,6 +116,44 @@ describe("loadPlaylists and rows", () => {
       ]),
     );
     expect(loadPlaylists()[0].rows[0].uid).toBeUndefined();
+  });
+
+  /**
+   * Stored before lengths were kept. Zero is the honest answer — the length is
+   * genuinely unknown — and the enqueue path looks one up rather than sending
+   * a zero the server would run out instantly.
+   */
+  it("loads a track stored without a length as length zero", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([
+        {
+          id: "one",
+          name: "Morning",
+          rows: [{ track: { uri: TRACK.uri, trackId: TRACK.trackId } }],
+          isPublic: false,
+        },
+      ]),
+    );
+    expect(loadPlaylists()[0].rows[0].track.durationMs).toBe(0);
+  });
+
+  it("refuses a stored length that is not a positive number", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([
+        {
+          id: "one",
+          name: "Morning",
+          rows: [
+            { track: { ...TRACK, durationMs: "long" } },
+            { track: { ...TRACK, trackId: "b", durationMs: -5 } },
+          ],
+          isPublic: false,
+        },
+      ]),
+    );
+    expect(loadPlaylists()[0].rows.map((row) => row.track.durationMs)).toEqual([0, 0]);
   });
 
   it("skips a playlist with neither rows nor tracks", () => {

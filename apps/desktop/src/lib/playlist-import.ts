@@ -9,12 +9,24 @@ import {
   type PlaylistService,
 } from "@spotjam/room";
 
-/** What the Rust `spotify_fetch_playlist` command returns. */
+/**
+ * What the Rust `spotify_fetch_playlist` command returns.
+ *
+ * Unlike `spotify_fetch_tracks`, this one is camelCase on the wire — so
+ * `durationMs` arrives spelled as it is used, with no mapping.
+ */
 export interface FetchedPlaylist {
   name: string;
   canAdd?: boolean;
   canEditItems?: boolean;
-  tracks: { uri: string; name: string; artist: string; uid?: string }[];
+  tracks: {
+    uri: string;
+    name: string;
+    artist: string;
+    uid?: string;
+    /** Track length in ms. Absent or zero means the client did not say. */
+    durationMs?: number;
+  }[];
 }
 
 /** The tagged failure the Rust commands reject with. */
@@ -169,11 +181,19 @@ function toRows(entries: FetchedPlaylist["tracks"]): PlaylistRow[] {
     const trackId = entry.uri.slice(TRACK_URI_PREFIX.length);
     if (!trackId) continue;
     rows.push({
-      track: { uri: entry.uri, trackId },
+      // Zero stands for "the client did not say". The enqueue path looks a
+      // missing length up rather than sending a zero, which the server would
+      // run out the instant it started.
+      track: { uri: entry.uri, trackId, durationMs: durationOf(entry.durationMs) },
       ...(entry.uid ? { uid: entry.uid } : {}),
     });
   }
   return rows;
+}
+
+/** A usable length, or 0 for none. Guards a negative or non-numeric field. */
+function durationOf(durationMs: number | undefined): number {
+  return typeof durationMs === "number" && durationMs > 0 ? durationMs : 0;
 }
 
 function toRowRefs(rows: PlaylistRow[]): { uid: string; uri: string }[] {

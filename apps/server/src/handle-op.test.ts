@@ -14,11 +14,17 @@ import { seededRng } from "./testing.ts";
 const ALICE = "a".repeat(64);
 const BOB = "b".repeat(64);
 const NOW = 1_700_000_000_000;
+const MINUTE = 60_000;
 
 const ctx: OpContext = { now: NOW, rng: seededRng(7) };
 
-function track(id: string): QueueItem {
-  return { id, uri: `spotify:track:${id}`, trackId: id };
+/** The same context at a later instant. */
+function at(now: number): OpContext {
+  return { now, rng: seededRng(7) };
+}
+
+function track(id: string, durationMs = 3 * MINUTE): QueueItem {
+  return { id, uri: `spotify:track:${id}`, trackId: id, durationMs };
 }
 
 function room(): RoomState {
@@ -78,7 +84,11 @@ describe("handleOp", () => {
 
   it("rejects malformed op fields", () => {
     const cases: Op[] = [
-      { type: "enqueue", roomId: "jam", items: [{ id: "", uri: "", trackId: "" }] },
+      {
+        type: "enqueue",
+        roomId: "jam",
+        items: [{ id: "", uri: "", trackId: "", durationMs: 1 }],
+      },
       { type: "remove", roomId: "jam", itemId: "" },
       { type: "send-to-top", roomId: "jam", itemId: "" },
       { type: "move-many", roomId: "jam", itemIds: [], beforeItemId: null },
@@ -89,6 +99,37 @@ describe("handleOp", () => {
     for (const op of cases) {
       expect(handleOp(room(), ALICE, op, ctx).error).toBe("malformed");
     }
+  });
+
+  it("rejects a queue item without a usable duration", () => {
+    // The server advances the pointer on this number alone. A track without one
+    // would stall the room, so it never gets in.
+    const cases: unknown[] = [
+      { id: "a1", uri: "spotify:track:a1", trackId: "a1" },
+      { id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: 0 },
+      { id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: -1 },
+      { id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: 1.5 },
+      { id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: Number.NaN },
+      { id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: Number.POSITIVE_INFINITY },
+      { id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: "200000" },
+    ];
+
+    for (const item of cases) {
+      const op = { type: "enqueue", roomId: "jam", items: [item] } as unknown as Op;
+      expect(handleOp(room(), ALICE, op, ctx).error).toBe("malformed");
+    }
+  });
+
+  it("rejects a playlist track without a usable duration", () => {
+    const op = {
+      type: "set-public-playlists",
+      roomId: "jam",
+      playlists: [
+        { id: "p1", name: "Morning", tracks: [{ uri: "spotify:track:a1", trackId: "a1" }] },
+      ],
+    } as unknown as Op;
+
+    expect(handleOp(room(), ALICE, op, ctx).error).toBe("malformed");
   });
 
   it("rejects a non-array enqueue payload", () => {
@@ -173,57 +214,55 @@ describe("handleOp", () => {
     expect(state.pointer.itemId).toBe("a2");
   });
 
-  it("keeps a progress sample without moving the pointer", () => {
+  it("catches the room up before the op lands", () => {
+    // No client says a track ended, so an op arriving after the end must act on
+    // the track that is really playing -- here, pausing a2 rather than a1.
     let state = room();
     state = Room.setBroadcasting(state, ALICE, true);
-    state = Room.enqueue(state, ALICE, [track("a1")]);
+    state = Room.enqueue(state, ALICE, [track("a1", MINUTE), track("a2", 5 * MINUTE)]);
     state = Room.advance(state, NOW);
 
-    const outcome = handleOp(state, ALICE, {
-      type: "report-progress",
-      roomId: "jam",
-      itemId: "a1",
-      positionMs: 12_345,
-      durationMs: 200_000,
-      sampledAtEpochMs: NOW,
-    }, ctx);
+    const outcome = handleOp(
+      state,
+      ALICE,
+      { type: "set-paused", roomId: "jam", paused: true },
+      at(NOW + MINUTE + 10_000),
+    );
 
     expect(outcome.error).toBeUndefined();
-    // The server owns when playback started; a sample never rewrites it.
-    expect(outcome.state.pointer).toEqual(state.pointer);
-    expect(outcome.state.members.get(ALICE)?.progress).toEqual({
-      itemId: "a1",
-      positionMs: 12_345,
-      durationMs: 200_000,
-      sampledAtEpochMs: NOW,
+    expect(outcome.state.pointer).toMatchObject({
+      itemId: "a2",
+      isPaused: true,
+      // a2 started at a1's exact end, so it is 10s in, not 70s.
+      pausedAtOffsetMs: 10_000,
     });
   });
 
-  it("rejects a progress sample missing its fields", () => {
+  it("settles even when the op is refused", () => {
+    // The clock moved regardless of what the client sent.
     let state = room();
     state = Room.setBroadcasting(state, ALICE, true);
-    state = Room.enqueue(state, ALICE, [track("a1")]);
+    state = Room.enqueue(state, ALICE, [track("a1", MINUTE), track("a2", 5 * MINUTE)]);
     state = Room.advance(state, NOW);
 
-    for (const bad of [
-      { itemId: "", positionMs: 1, durationMs: 2, sampledAtEpochMs: NOW },
-      { itemId: "a1", positionMs: Number.NaN, durationMs: 2, sampledAtEpochMs: NOW },
-      { itemId: "a1", positionMs: 1, durationMs: Number.NaN, sampledAtEpochMs: NOW },
-      { itemId: "a1", positionMs: 1, durationMs: 2, sampledAtEpochMs: Number.NaN },
-    ]) {
-      const outcome = handleOp(
-        state,
-        ALICE,
-        { type: "report-progress", roomId: "jam", ...bad },
-        ctx,
-      );
-      expect(outcome.error).toBe("malformed");
-    }
+    const outcome = handleOp(
+      state,
+      ALICE,
+      { type: "remove", roomId: "jam", itemId: "" },
+      at(NOW + MINUTE),
+    );
+
+    expect(outcome.error).toBe("malformed");
+    expect(outcome.state.pointer.itemId).toBe("a2");
   });
 
   it("stores well-formed public playlists", () => {
     const playlists: SharedPlaylist[] = [
-      { id: "p1", name: "Morning", tracks: [{ uri: "spotify:track:a1", trackId: "a1" }] },
+      {
+        id: "p1",
+        name: "Morning",
+        tracks: [{ uri: "spotify:track:a1", trackId: "a1", durationMs: 200_000 }],
+      },
       { id: "p2", name: "", tracks: [] },
     ];
 
@@ -247,7 +286,7 @@ describe("handleOp", () => {
       [{ id: "p1", name: "Morning" }],
       [{ id: "p1", name: "Morning", tracks: "nope" }],
       [{ id: "p1", name: "Morning", tracks: [{ uri: "spotify:track:a1" }] }],
-      [{ id: "p1", name: "Morning", tracks: [{ uri: "", trackId: "a1" }] }],
+      [{ id: "p1", name: "Morning", tracks: [{ uri: "", trackId: "a1", durationMs: 1 }] }],
       [null],
     ];
 

@@ -30,31 +30,21 @@ export interface SessionEntry {
   ownerName: string;
 }
 
-/**
- * The newest playback sample from whoever is broadcasting the current track.
- *
- * The pointer says where playback started; this says where it actually is.
- * They drift apart whenever the broadcaster's player stutters, buffers or is
- * scrubbed outside the app, and this is the half that tracks reality.
- */
-export interface Progress {
-  itemId: string;
-  positionMs: number;
-  durationMs: number;
-  /** Reporter's clock when sampled. Extrapolate forward from here. */
-  sampledAtEpochMs: number;
-}
-
 /** What is playing, decided by the server. */
 export interface PlaybackPointer {
   itemId: string | null;
   ownerPubkey: PublicKeyHex | null;
   uri: string | null;
-  /** Epoch ms at which position was zero. Meaningful while playing. */
+  /**
+   * Epoch ms at which position was zero, in the server's clock. Meaningful
+   * while playing. Clients convert it with their own clock offset.
+   */
   startedAtEpochMs: number;
   isPaused: boolean;
   /** Frozen position. Meaningful only while paused. */
   pausedAtOffsetMs: number;
+  /** Length of the pointed track in ms; 0 when itemId is null. */
+  durationMs: number;
 }
 
 export const NULL_POINTER: PlaybackPointer = {
@@ -64,6 +54,7 @@ export const NULL_POINTER: PlaybackPointer = {
   startedAtEpochMs: 0,
   isPaused: false,
   pausedAtOffsetMs: 0,
+  durationMs: 0,
 };
 
 /** The whole of a room, as of one moment. */
@@ -75,11 +66,6 @@ export interface RoomSnapshot {
   /** The caller's own queue, in their order. */
   myQueue: QueueItem[];
   pointer: PlaybackPointer;
-  /**
-   * The current broadcaster's newest sample, or null when nobody has reported
-   * one for the track the pointer names. Every client renders the same bar.
-   */
-  progress: Progress | null;
   /** Server clock at snapshot time, for drift correction. */
   serverTime: number;
 }

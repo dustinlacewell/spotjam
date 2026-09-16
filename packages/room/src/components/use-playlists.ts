@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { ParsedTrack } from "../lib/spotify-link";
+import type { PlaylistTrack } from "@spotjam/protocol";
 import {
   createPlaylist,
   createPlaylistWithTracks,
@@ -31,7 +31,7 @@ export interface PlaylistsApi {
   remove(id: string): void;
   rename(id: string, name: string): void;
   /** Inserts just before `beforeTrackId`, or at the end when null or not found. */
-  insertTracks(id: string, tracks: ParsedTrack[], beforeTrackId: string | null): void;
+  insertTracks(id: string, tracks: PlaylistTrack[], beforeTrackId: string | null): void;
   removeTrack(id: string, index: number): void;
   shuffle(id: string): void;
   /** Shares a playlist with the room, or takes it back. */
@@ -54,7 +54,7 @@ export interface PlaylistsApi {
    * the tracks are written there and the playlist syncs to pick them up —
    * otherwise the next sync would throw them away.
    */
-  addTracks(id: string, tracks: ParsedTrack[]): void;
+  addTracks(id: string, tracks: PlaylistTrack[]): void;
   /**
    * Moves one row to sit before `beforeTrackId`, or to the end when null.
    *
@@ -151,7 +151,7 @@ export function usePlaylists(service?: PlaylistService): PlaylistsApi {
   );
 
   const addTracks = useCallback(
-    (id: string, tracks: ParsedTrack[]) => {
+    (id: string, tracks: PlaylistTrack[]) => {
       if (tracks.length === 0) return;
 
       const playlist = currentPlaylist(id);
@@ -245,7 +245,7 @@ export function usePlaylists(service?: PlaylistService): PlaylistsApi {
       [apply],
     ),
     insertTracks: useCallback(
-      (id: string, tracks: ParsedTrack[], beforeTrackId: string | null) =>
+      (id: string, tracks: PlaylistTrack[], beforeTrackId: string | null) =>
         apply((l) => insertTracksIntoPlaylist(l, id, tracks, beforeTrackId)),
       [apply],
     ),

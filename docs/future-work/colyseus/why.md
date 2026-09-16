@@ -5,8 +5,8 @@ Status: not built — proposal.
 ## What the snapshot broadcast cannot do cheaply
 
 `apps/server/src/session.ts#publish` builds one `RoomSnapshot` per recipient on every
-committed op. Cost per op is `members × snapshot size`. `report-progress` lands once a
-second per broadcaster and re-sends every participant row and the whole session queue.
+committed op. Cost per op is `members × snapshot size`. Every op re-sends every
+participant row and the whole session queue, however small the change was.
 Each new per-member field (avatar, reactions) either grows the snapshot or repeats the
 `playlistsRevision` workaround: a counter in the snapshot plus a request/reply pair.
 A reconnect is a fresh socket, `hello`, and `join-room`; the seat is lost at once.

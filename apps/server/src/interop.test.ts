@@ -183,7 +183,7 @@ async function joinRoom(
  * wire carries — this only keeps it signable.
  */
 function track(id: string): { [key: string]: CanonicalValue } {
-  return { id, uri: `spotify:track:${id}`, trackId: id };
+  return { id, uri: `spotify:track:${id}`, trackId: id, durationMs: 200_000 };
 }
 
 function ids(snapshot: RoomSnapshot): string[] {
@@ -457,48 +457,9 @@ describe("interop — a signed client against a real server", () => {
     expect(expectRoomState(await client.next()).pointer).toEqual(NULL_POINTER);
   });
 
-  it("relays the broadcaster's progress to everyone listening", async () => {
-    const server = await start();
-    const alice = generateKeypair();
-    const bob = generateKeypair();
-    const clientA = await Client.connect(server.port);
-    const clientB = await Client.connect(server.port);
-
-    await registerAs(clientA, alice, "alice");
-    await registerAs(clientB, bob, "bob");
-    await joinRoom(clientA, alice, "jam");
-    await joinRoom(clientB, bob, "jam");
-    await clientA.next();
-
-    clientA.send({ type: "set-broadcasting", roomId: "jam", broadcasting: true }, alice);
-    await clientA.next();
-    await clientB.next();
-    // Alice is already broadcasting, so the enqueue itself starts playback.
-    clientA.send({ type: "enqueue", roomId: "jam", items: [track("a1")] }, alice);
-    const playing = expectRoomState(await clientA.next());
-    await clientB.next();
-    expect(playing.pointer.itemId).toBe("a1");
-    expect(playing.progress).toBeNull();
-
-    // Alice is the one making sound; her sample is what the room is hearing.
-    clientA.send(
-      {
-        type: "report-progress",
-        roomId: "jam",
-        itemId: "a1",
-        positionMs: 42_000,
-        durationMs: 200_000,
-        sampledAtEpochMs: Date.now(),
-      },
-      alice,
-    );
-    await clientA.next();
-
-    const bobsView = expectRoomState(await clientB.next());
-    expect(bobsView.progress).toMatchObject({ itemId: "a1", positionMs: 42_000 });
-  });
-
-  it("drops the relayed progress once the track changes", async () => {
+  it("carries the track's duration in the pointer", async () => {
+    // The whole room reads position off the pointer, so the duration has to
+    // survive the wire rather than be looked up somewhere.
     const server = await start();
     const alice = generateKeypair();
     const client = await Client.connect(server.port);
@@ -507,31 +468,29 @@ describe("interop — a signed client against a real server", () => {
     await joinRoom(client, alice, "jam");
     client.send({ type: "set-broadcasting", roomId: "jam", broadcasting: true }, alice);
     await client.next();
-    client.send(
-      { type: "enqueue", roomId: "jam", items: [track("a1"), track("a2")] },
-      alice,
-    );
-    // Alice is already broadcasting, so the enqueue itself starts a1.
-    await client.next();
+    client.send({ type: "enqueue", roomId: "jam", items: [track("a1")] }, alice);
 
+    const playing = expectRoomState(await client.next());
+    expect(playing.pointer).toMatchObject({ itemId: "a1", durationMs: 200_000 });
+  });
+
+  it("refuses a queued track with no duration", async () => {
+    const server = await start();
+    const alice = generateKeypair();
+    const client = await Client.connect(server.port);
+
+    await registerAs(client, alice, "alice");
+    await joinRoom(client, alice, "jam");
     client.send(
       {
-        type: "report-progress",
+        type: "enqueue",
         roomId: "jam",
-        itemId: "a1",
-        positionMs: 42_000,
-        durationMs: 200_000,
-        sampledAtEpochMs: Date.now(),
+        items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1" }],
       },
       alice,
     );
-    expect(expectRoomState(await client.next()).progress).not.toBeNull();
 
-    // The sample described a1; a2 must not inherit its position.
-    client.send({ type: "skip", roomId: "jam" }, alice);
-    const next = expectRoomState(await client.next());
-    expect(next.pointer.itemId).toBe("a2");
-    expect(next.progress).toBeNull();
+    expect(await client.next()).toMatchObject({ type: "error", code: "malformed" });
   });
 
   it("clears the pointer when the broadcaster leaves the room", async () => {

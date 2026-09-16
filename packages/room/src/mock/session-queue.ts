@@ -185,6 +185,9 @@ export function advance(state: MockState, now: number): MockState {
       startedAtEpochMs: now,
       isPaused: false,
       pausedAtOffsetMs: 0,
+      // The pointer carries its track's length, as the server's does: it is
+      // what every client reads the bar and the track end out of.
+      durationMs: head.durationMs,
     },
   };
 }

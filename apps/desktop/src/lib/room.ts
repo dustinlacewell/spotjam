@@ -36,24 +36,18 @@ import {
   participantsOf,
   peerPlaylistsOf,
   pointerOf,
-  progressOf,
   queueOf,
   reduce,
+  serverNowOf,
   sessionQueueOf,
   usernameOf,
   type ConnectionStatus,
-  type Progress,
   type Room,
   type RoomError,
   type RoomView,
 } from "@spotjam/room";
 
-export type {
-  ConnectionStatus,
-  Progress,
-  RoomError,
-  SocketPhase,
-} from "@spotjam/room";
+export type { ConnectionStatus, RoomError, SocketPhase } from "@spotjam/room";
 export { toQueueItems } from "@spotjam/room";
 export type {
   Participant,
@@ -78,11 +72,6 @@ export class RoomClient implements Room {
 
   #view: RoomView = INITIAL_VIEW;
   #closed = false;
-  /**
-   * Our own sample of the local player. Used only until the server echoes a
-   * sample back, which it does whenever this client is the broadcaster.
-   */
-  #myProgress: Progress | null = null;
 
   readonly #connection: Connection;
   readonly #unsubscribeEvent: () => void;
@@ -92,10 +81,17 @@ export class RoomClient implements Room {
   readonly #statusListeners = new Set<(status: ConnectionStatus) => void>();
   readonly #changeListeners = new Set<() => void>();
 
-  constructor(connection: Connection, roomId: string) {
+  /**
+   * This machine's clock. Injected so a test can pin it, and so the offset
+   * folded out of each snapshot is measured against a clock the test controls.
+   */
+  readonly #now: () => number;
+
+  constructor(connection: Connection, roomId: string, now: () => number = Date.now) {
     this.roomId = roomId;
     this.myPubkey = connection.myPubkey;
     this.#connection = connection;
+    this.#now = now;
 
     this.#unsubscribeEvent = connection.onEvent((event) => this.#onEvent(event));
     this.#unsubscribeReady = connection.onReady(() => this.#join());
@@ -149,7 +145,10 @@ export class RoomClient implements Room {
     }
 
     const previousStatus = this.#view.status;
-    const reduced = reduce(this.#view, event);
+    // The local clock is read here, at the moment the frame landed, and handed
+    // to the pure reducer — which folds it against the snapshot's server time
+    // into the offset every playback position is then read through.
+    const reduced = reduce(this.#view, event, this.#now());
     // reduce() only decides `synced`; the socket half always mirrors the
     // shared connection's own live status, which it does not know about.
     const socketChanged = previousStatus.socket !== this.#liveSocket();
@@ -259,18 +258,14 @@ export class RoomClient implements Room {
   }
 
   /**
-   * Where the current track actually sits.
+   * This instant, in the server's clock.
    *
-   * The broadcaster's sample, as relayed by the server, so every client draws
-   * the same bar. Our own sample stands in only until the first one arrives --
-   * otherwise the bar would stall for a beat on every track change.
+   * The server dates the pointer in its own clock, so a position read against
+   * `Date.now()` would be wrong by however far the two machines disagree. The
+   * offset folded out of each snapshot's `serverTime` closes that gap.
    */
-  myProgress(): Progress | null {
-    const shared = progressOf(this.#view);
-    if (shared !== null) return shared;
-    const pointer = this.getPlaybackPointer();
-    if (pointer.itemId === null) return null;
-    return this.#myProgress?.itemId === pointer.itemId ? this.#myProgress : null;
+  serverNow(): number {
+    return serverNowOf(this.#view, this.#now());
   }
 
   // --- queue ops -----------------------------------------------------
@@ -342,18 +337,6 @@ export class RoomClient implements Room {
 
   skip(): void {
     this.#sendOp(ops.skip(this.roomId));
-  }
-
-  /**
-   * Record where the local player is, and tell the server.
-   *
-   * The sample is kept locally to cover the gap before the server echoes one
-   * back, and sent on so everyone else's bar can track this player.
-   */
-  setMyProgress(progress: Progress | null): void {
-    this.#myProgress = progress;
-    if (progress === null) return;
-    this.#sendOp(ops.reportProgress(this.roomId, progress));
   }
 
   // --- teardown ------------------------------------------------------

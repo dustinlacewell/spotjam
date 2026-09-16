@@ -13,6 +13,9 @@ pub struct TrackMetadata {
     pub title: String,
     pub artist: String,
     pub thumbnail_url: Option<String>,
+    /// Track length in milliseconds. 0 when the client's message carries no
+    /// duration.
+    pub duration_ms: u64,
 }
 
 /// The metadata extension kind for a `spotify.metadata.Track` (`TRACK_V4`).
@@ -101,6 +104,7 @@ fn metadata_from_track(track: &proto::Track) -> TrackMetadata {
         title: track.name.as_deref().unwrap_or_default().trim().to_string(),
         artist,
         thumbnail_url: widest_cover(track),
+        duration_ms: track.duration.unwrap_or(0).max(0) as u64,
     }
 }
 
@@ -131,6 +135,9 @@ mod proto {
         pub album: Option<Album>,
         #[prost(message, repeated, tag = "4")]
         pub artist: Vec<Artist>,
+        /// Milliseconds. Plain `int32` in spotify.metadata, not zigzag.
+        #[prost(int32, optional, tag = "7")]
+        pub duration: Option<i32>,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
@@ -178,6 +185,7 @@ mod tests {
             metadata.thumbnail_url.as_deref(),
             Some("https://i.scdn.co/image/ab67616d0000b273cffd3d7b2d383e9391eb2f18")
         );
+        assert_eq!(metadata.duration_ms, 717_650);
     }
 
     #[test]
@@ -195,6 +203,7 @@ mod tests {
                 }),
             }),
             artist: vec![],
+            duration: None,
         };
         assert_eq!(
             metadata_from_track(&track).thumbnail_url.as_deref(),
@@ -212,11 +221,31 @@ mod tests {
                 proto::Artist { name: Some("".into()) },
                 proto::Artist { name: Some("B".into()) },
             ],
+            duration: None,
         };
         let metadata = metadata_from_track(&track);
         assert_eq!(metadata.title, "Track");
         assert_eq!(metadata.artist, "A, B");
         assert_eq!(metadata.thumbnail_url, None);
+    }
+
+    /// Tag 7 is a plain `int32`, so a negative or absent value must not wrap
+    /// into an enormous u64.
+    #[test]
+    fn reads_the_duration_and_floors_it_at_zero() {
+        let with = proto::Track {
+            name: None,
+            album: None,
+            artist: vec![],
+            duration: Some(214_000),
+        };
+        assert_eq!(metadata_from_track(&with).duration_ms, 214_000);
+
+        let negative = proto::Track { duration: Some(-1), ..with.clone() };
+        assert_eq!(metadata_from_track(&negative).duration_ms, 0);
+
+        let absent = proto::Track { duration: None, ..with };
+        assert_eq!(metadata_from_track(&absent).duration_ms, 0);
     }
 
     #[test]

@@ -8,10 +8,10 @@
 import {
   NULL_POINTER,
   appendUniqueTracks,
+  endsAt,
   moveMany as moveManyItems,
   type Participant,
   type PlaybackPointer,
-  type Progress,
   type PublicKeyHex,
   type QueueItem,
   type RoomSnapshot,
@@ -27,8 +27,6 @@ export interface Member {
   username: string;
   broadcasting: boolean;
   queue: QueueItem[];
-  /** Newest playback sample this member reported, if any. */
-  progress: Progress | null;
   /** Playlists this member offers the room. Replaced whole, never patched. */
   publicPlaylists: readonly SharedPlaylist[];
   /** Bumps on every replace, so viewers can tell their copy went stale. */
@@ -82,7 +80,6 @@ export function join(
     username,
     broadcasting: false,
     queue: [],
-    progress: null,
     publicPlaylists: [],
     playlistsRevision: 0,
   };
@@ -256,10 +253,7 @@ export function advance(state: RoomState, now: number): RoomState {
     return { ...state, pointer: NULL_POINTER };
   }
 
-  // Samples describe the outgoing track, so they die with it.
-  const advanced = clearProgress(
-    withMember(state, { ...member, queue: member.queue.slice(1) }),
-  );
+  const advanced = withMember(state, { ...member, queue: member.queue.slice(1) });
   return {
     ...advanced,
     turnCursor: state.turnCursor + 1,
@@ -270,8 +264,26 @@ export function advance(state: RoomState, now: number): RoomState {
       startedAtEpochMs: now,
       isPaused: false,
       pausedAtOffsetMs: 0,
+      durationMs: head.durationMs,
     },
   };
+}
+
+/**
+ * Catch the pointer up to `now`.
+ *
+ * Nobody reports that a track ended: the server works it out from the pointer's
+ * own duration. Each step hands the next track the exact instant the last one
+ * ran out, so the clock stays continuous and a run of short tracks can be
+ * crossed in one call. Returns the same object when nothing has ended.
+ */
+export function settle(state: RoomState, now: number): RoomState {
+  let current = state;
+  for (;;) {
+    const end = endsAt(current.pointer);
+    if (end === null || end > now) return current;
+    current = advance(current, end);
+  }
 }
 
 /**
@@ -320,27 +332,16 @@ export function setPaused(state: RoomState, paused: boolean, now: number): RoomS
 }
 
 /**
- * Record where a member's player actually sits.
+ * Move the pointer within the current track.
  *
- * Kept only while it describes the track the pointer names: a sample for
- * anything else is stale by definition and would render a bar for the wrong
- * track. Rejecting it here means `projectSnapshot` never has to re-check.
+ * The target is clamped to the track. Past the end is not a seek anyone can
+ * mean: a paused pointer would sit beyond its own duration, which every client
+ * reads as a track that has run out but never advances, and the room wedges.
  */
-export function reportProgress(
-  state: RoomState,
-  pubkey: PublicKeyHex,
-  progress: Progress,
-): RoomState {
-  const member = state.members.get(pubkey);
-  if (member === undefined) return state;
-  if (state.pointer.itemId !== progress.itemId) return state;
-  return withMember(state, { ...member, progress });
-}
-
 export function seek(state: RoomState, positionMs: number, now: number): RoomState {
   const { pointer } = state;
   if (pointer.itemId === null) return state;
-  const position = Math.max(0, positionMs);
+  const position = Math.min(Math.max(0, positionMs), pointer.durationMs);
 
   return {
     ...state,
@@ -371,22 +372,8 @@ export function projectSnapshot(
     sessionQueue: buildSessionQueue(state),
     myQueue: [...(state.members.get(forPubkey)?.queue ?? [])],
     pointer: state.pointer,
-    progress: currentProgress(state),
     serverTime: now,
   };
-}
-
-/**
- * The sample belonging to whoever is feeding the current track.
- *
- * Only the pointer's owner is playing the audio, so only their sample
- * describes what the room is hearing.
- */
-function currentProgress(state: RoomState): Progress | null {
-  const { itemId, ownerPubkey } = state.pointer;
-  if (itemId === null || ownerPubkey === null) return null;
-  const progress = state.members.get(ownerPubkey)?.progress ?? null;
-  return progress !== null && progress.itemId === itemId ? progress : null;
 }
 
 function listParticipants(state: RoomState): Participant[] {
@@ -482,14 +469,5 @@ function mapQueue(
 function settlePointer(state: RoomState): RoomState {
   const anyBroadcasting = membersInOrder(state).some((member) => member.broadcasting);
   if (anyBroadcasting || state.pointer.itemId === null) return state;
-  return clearProgress({ ...state, pointer: NULL_POINTER });
-}
-
-/** Drop every sample. Used whenever the pointer stops naming the same track. */
-function clearProgress(state: RoomState): RoomState {
-  const members = new Map(state.members);
-  for (const [pubkey, member] of members) {
-    if (member.progress !== null) members.set(pubkey, { ...member, progress: null });
-  }
-  return { ...state, members };
+  return { ...state, pointer: NULL_POINTER };
 }

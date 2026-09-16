@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { QueueItem } from "@spotjam/protocol";
+import { positionAt, type QueueItem } from "@spotjam/protocol";
 
 import type { Room } from "./room";
 
@@ -24,8 +24,11 @@ export interface RoomHarness {
   destroy?(): void;
 }
 
+/** Long enough that the clock nudges below never run a seeded track out. */
+const TRACK_MS = 600_000;
+
 function track(id: string): QueueItem {
-  return { id, uri: `spotify:track:${id}`, trackId: id };
+  return { id, uri: `spotify:track:${id}`, trackId: id, durationMs: TRACK_MS };
 }
 
 const A = track("a");
@@ -203,59 +206,84 @@ export function describeRoomContract(name: string, make: () => RoomHarness): voi
         });
       });
 
-      it("advances myProgress as the clock runs", () => {
-        withRoom(({ room, advanceClock }) => {
-          const start = room.myProgress()?.positionMs ?? 0;
-          advanceClock(5_000);
-          expect(room.myProgress()?.positionMs).toBe(start + 5_000);
+      /** Where the pointer sits, read on the room's own server clock. */
+      function positionOf(room: Room): number {
+        return positionAt(room.getPlaybackPointer(), room.serverNow());
+      }
+
+      it("advances the pointer's position as the clock runs", () => {
+        withRoom((harness) => {
+          const start = positionOf(harness.room);
+          harness.advanceClock(5_000);
+          expect(positionOf(harness.room)).toBe(start + 5_000);
         });
       });
 
-      it("freezes myProgress while paused", () => {
-        withRoom(({ room, advanceClock }) => {
-          advanceClock(3_000);
-          room.setPaused(true);
-          const frozen = room.myProgress()?.positionMs;
+      it("freezes the position while paused", () => {
+        withRoom((harness) => {
+          harness.advanceClock(3_000);
+          harness.room.setPaused(true);
+          const frozen = positionOf(harness.room);
 
-          advanceClock(10_000);
-          expect(room.myProgress()?.positionMs).toBe(frozen);
+          harness.advanceClock(10_000);
+          expect(positionOf(harness.room)).toBe(frozen);
         });
       });
 
       it("resumes from where it paused", () => {
-        withRoom(({ room, advanceClock }) => {
-          advanceClock(3_000);
-          room.setPaused(true);
-          const frozen = room.myProgress()?.positionMs ?? 0;
+        withRoom((harness) => {
+          harness.advanceClock(3_000);
+          harness.room.setPaused(true);
+          const frozen = positionOf(harness.room);
 
-          advanceClock(10_000);
-          room.setPaused(false);
-          expect(room.myProgress()?.positionMs).toBe(frozen);
+          harness.advanceClock(10_000);
+          harness.room.setPaused(false);
+          expect(positionOf(harness.room)).toBe(frozen);
 
-          advanceClock(1_000);
-          expect(room.myProgress()?.positionMs).toBe(frozen + 1_000);
+          harness.advanceClock(1_000);
+          expect(positionOf(harness.room)).toBe(frozen + 1_000);
         });
       });
 
-      it("moves myProgress to the seeked position", () => {
+      it("moves the position to the seeked point", () => {
         withRoom(({ room }) => {
           room.seekTo(42_000);
-          expect(room.myProgress()?.positionMs).toBe(42_000);
+          expect(positionOf(room)).toBe(42_000);
         });
       });
 
       it("keeps a seek while paused", () => {
-        withRoom(({ room, advanceClock }) => {
-          room.setPaused(true);
-          room.seekTo(20_000);
-          advanceClock(5_000);
-          expect(room.myProgress()?.positionMs).toBe(20_000);
+        withRoom((harness) => {
+          harness.room.setPaused(true);
+          harness.room.seekTo(20_000);
+          harness.advanceClock(5_000);
+          expect(positionOf(harness.room)).toBe(20_000);
         });
       });
 
-      it("reports progress for the item the pointer names", () => {
+      it("carries the playing track's length on the pointer", () => {
         withRoom(({ room }) => {
-          expect(room.myProgress()?.itemId).toBe(room.getPlaybackPointer().itemId);
+          expect(room.getPlaybackPointer().durationMs).toBeGreaterThan(0);
+        });
+      });
+    });
+
+    describe("the server clock", () => {
+      it("tracks the room's own clock as it advances", () => {
+        withRoom((harness) => {
+          const before = harness.room.serverNow();
+          harness.advanceClock(7_000);
+          expect(harness.room.serverNow()).toBe(before + 7_000);
+        });
+      });
+
+      it("reads the pointer's start time in the same frame", () => {
+        // The pointer is stamped in server time, so a position read against
+        // serverNow() must land inside the track rather than an epoch away.
+        withRoom(({ room }) => {
+          const position = positionAt(room.getPlaybackPointer(), room.serverNow());
+          expect(position).toBeGreaterThanOrEqual(0);
+          expect(position).toBeLessThanOrEqual(room.getPlaybackPointer().durationMs);
         });
       });
     });

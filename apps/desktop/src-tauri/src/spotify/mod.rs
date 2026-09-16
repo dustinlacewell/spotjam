@@ -13,7 +13,7 @@ mod session;
 mod target;
 mod track_api;
 
-pub use player_api::PlayerState;
+pub use player_api::{Observation, PlayerState};
 pub use playlist_api::{PlaylistContents, PlaylistError, RowRef};
 pub use session::BridgeState;
 pub use track_api::TrackMetadata;
@@ -163,6 +163,19 @@ pub async fn spotify_get_state(
 ) -> Result<PlayerState, String> {
     bridge
         .with_client(|client| Box::pin(player_api::get_state(client)))
+        .await
+}
+
+/// Playback state and the head of the user queue, read in one round trip.
+///
+/// One tick asks once: the two halves then describe the same moment, which
+/// separate `spotify_get_state` / `spotify_get_queue` calls cannot promise.
+#[tauri::command]
+pub async fn spotify_observe(
+    bridge: tauri::State<'_, SpotifyBridge>,
+) -> Result<Observation, String> {
+    bridge
+        .with_client(|client| Box::pin(player_api::observe(client)))
         .await
 }
 

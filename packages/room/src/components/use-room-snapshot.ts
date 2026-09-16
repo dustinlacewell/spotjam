@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   Participant,
   PlaybackPointer,
-  Progress,
   QueueItem,
   SessionEntry,
 } from "@spotjam/protocol";
@@ -14,11 +13,6 @@ export interface RoomSnapshot {
   participants: Participant[];
   sessionQueue: SessionEntry[];
   pointer: PlaybackPointer;
-  /**
-   * The current broadcaster's sample, so every client renders the same bar.
-   * Falls back to this client's own sample before the first one arrives.
-   */
-  myProgress: Progress | null;
   myQueue: QueueItem[];
   queueOf: (pubkey: string) => QueueItem[];
   /** The last typed error from the server, for the UI to surface. */
@@ -52,7 +46,6 @@ export function useRoomSnapshot(room: Room): RoomSnapshot {
     participants: room.participants(),
     sessionQueue: room.sessionQueue(),
     pointer: room.getPlaybackPointer(),
-    myProgress: room.myProgress(),
     myQueue: room.myQueue(),
     queueOf,
     error: room.lastError(),

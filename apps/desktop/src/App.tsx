@@ -10,12 +10,13 @@ import {
   type RoomServices,
 } from "@spotjam/room";
 import { Connection, Room } from "./lib/room";
-import { SyncDriver } from "./lib/sync-driver";
+import { PlaybackDriver } from "./lib/playback/driver";
+import { controlState } from "./lib/playback/control";
 import { loadIdentity, type StoredIdentity } from "./lib/identity";
 import { loadSessionPrefs, saveSessionPrefs } from "./lib/session-prefs";
 import { tauriTrackMetadata } from "./lib/track-metadata";
 import { tauriPlaylistService } from "./lib/playlist-import";
-import { tauriBridgeState } from "./lib/bridge-state";
+import { tauriBridgeState, type BridgeState } from "./lib/bridge-state";
 
 interface Session {
   roomId: string;
@@ -31,17 +32,45 @@ export default function App() {
   return <Screens />;
 }
 
-/** What @spotjam/room asks of its surroundings, answered by the desktop shell. */
-function useServices(driver: SyncDriver | null): RoomServices {
+/**
+ * What @spotjam/room asks of its surroundings, answered by the desktop shell.
+ *
+ * The control state the room reads is two facts at once — is there a client,
+ * and are we driving it — so the subscription listens to both sources and
+ * re-sends the combination whenever either moves.
+ */
+function useServices(driver: PlaybackDriver | null): RoomServices {
   return useMemo(
     () => ({
       trackMetadata: tauriTrackMetadata,
       playlistService: tauriPlaylistService,
       playerControl: driver
         ? {
-            subscribe: (listener: (control: PlayerControlState) => void) =>
-              driver.onControlChange(listener),
-            attach: () => driver.sync(),
+            subscribe: (listener: (control: PlayerControlState) => void) => {
+              let bridge: BridgeState | null = null;
+              let mode = driver.mode();
+              let last: PlayerControlState | null = null;
+              const emit = () => {
+                const next = controlState(bridge, mode);
+                if (next === last) return;
+                last = next;
+                listener(next);
+              };
+              const offBridge = tauriBridgeState.subscribe((state) => {
+                bridge = state;
+                emit();
+              });
+              const offMode = driver.onModeChange((next) => {
+                mode = next;
+                emit();
+              });
+              return () => {
+                offBridge();
+                offMode();
+              };
+            },
+            attach: () => driver.attach(),
+            detach: () => driver.detach(),
           }
         : undefined,
     }),
@@ -60,7 +89,7 @@ function Screens() {
   const [prefs] = useState(loadSessionPrefs);
   const [session, setSession] = useState<Session | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
-  const [driver, setDriver] = useState<SyncDriver | null>(null);
+  const [driver, setDriver] = useState<PlaybackDriver | null>(null);
   const [identity, setIdentity] = useState<IdentityState>({ status: "loading" });
   const [preSessionView, setPreSessionView] = useState<PreSessionView>("join");
   const services = useServices(driver);
@@ -104,7 +133,7 @@ function Screens() {
   useEffect(() => {
     if (!session || connection === null) return;
     const newRoom = new Room(connection, session.roomId);
-    const newDriver = new SyncDriver(newRoom);
+    const newDriver = new PlaybackDriver(newRoom);
     newDriver.start();
     setRoom(newRoom);
     setDriver(newDriver);

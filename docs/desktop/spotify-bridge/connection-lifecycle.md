@@ -74,6 +74,13 @@ anything. React commits its first host element well before the registry
 provider is in the tree, so a fiber is not evidence: the page can carry one
 and still throw on the walk.
 
-`SyncDriver` subscribes. On any transition into `ready` it runs `sync()`,
-so the room pointer is re-applied without leaving the room. `SpotifyGate`
-dims the room screen while the state is not `ready` and offers Sync.
+`PlaybackDriver` subscribes. Its ticks are gated on `ready`: while the state
+is anything else it issues nothing and forgets the last reading it took, so
+a player it could not watch is never held against the user. On any
+transition into `ready` it ticks at once rather than waiting out the poll
+interval — it observes the player and commands the difference, which puts
+the room's track back without leaving the room.
+
+`SpotifyGate` dims the room screen while the state is not `ready` and offers
+Sync. Sync calls `attach()`, so pressing it both forces a connection attempt
+and takes the player back if the user had it.

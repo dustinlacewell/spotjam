@@ -5,6 +5,7 @@
 import { seal, type CanonicalValue, type Envelope, type Keypair } from "@spotjam/protocol";
 
 import type { Clock, Rng } from "./ports.ts";
+import type { TimerHandle, Timers } from "./room-clock.ts";
 
 /** A clock the test moves by hand. */
 export class FakeClock implements Clock {
@@ -25,6 +26,44 @@ export class FakeClock implements Clock {
 
   set(ms: number): void {
     this.#now = ms;
+  }
+}
+
+/**
+ * Timers the test fires by hand.
+ *
+ * Nothing is scheduled with the host, so a suite never waits and never leaves a
+ * pending track-end timer holding the process open.
+ */
+export class FakeTimers implements Timers {
+  readonly #pending = new Map<number, { callback: () => void; delayMs: number }>();
+  #nextId = 1;
+
+  set(callback: () => void, delayMs: number): TimerHandle {
+    const id = this.#nextId++;
+    this.#pending.set(id, { callback, delayMs });
+    return id;
+  }
+
+  clear(handle: TimerHandle): void {
+    this.#pending.delete(handle as number);
+  }
+
+  get pendingCount(): number {
+    return this.#pending.size;
+  }
+
+  /** The delay the newest live timer is waiting out. */
+  get pendingDelay(): number | null {
+    return [...this.#pending.values()].at(-1)?.delayMs ?? null;
+  }
+
+  /** Run the newest live timer, as the host would. */
+  fire(): void {
+    const entry = [...this.#pending.entries()].at(-1);
+    if (entry === undefined) throw new Error("no timer was armed");
+    this.#pending.delete(entry[0]);
+    entry[1].callback();
   }
 }
 

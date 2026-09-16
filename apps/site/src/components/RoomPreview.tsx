@@ -20,11 +20,28 @@ function uri(trackId: string): `spotify:track:${string}` {
   return `spotify:track:${trackId}`;
 }
 
+/** Track lengths in ms, by track id. The room advances on these. */
+const LENGTHS_MS: Record<string, number> = {
+  "0wXuerDYiBnERgIpbb3JBR": 327_000,
+  "6QgjcU0zLnzq5OrUoSZ3OK": 163_000,
+  "3FtYbEfBqAlGO46NUDQSAt": 229_000,
+  "2ewpiHmQSLEjDdH5ClJp3g": 172_000,
+  "0VjIjW4GlUZAMYd2vXMi3b": 200_000,
+  "3KkXRkHbMCARz0aVfEt68P": 158_000,
+  "7ouMYWpwJ422jRcDASZB7P": 366_000,
+  "1mea3bSkSGXuIRvnydlB5b": 242_000,
+  "2takcwOaAZWiXQijPHIx7B": 241_000,
+  "4uLU6hMCjMI75M1A2tKUQC": 213_000,
+  "5ChkMS8OtdzJeqyybCc9R5": 294_000,
+  "1BxfuPKGuaTgP7aM0Bbdwr": 178_000,
+  "3z8h0TU7ReDPLIbEnYhWZb": 354_000,
+};
+
 function item(id: string, trackId: string): QueueItem {
-  return { id, uri: uri(trackId), trackId };
+  return { id, uri: uri(trackId), trackId, durationMs: LENGTHS_MS[trackId] ?? 0 };
 }
 
-const TRACKS: Record<string, TrackInfo> = {
+const TRACKS: Record<string, Omit<TrackInfo, "durationMs">> = {
   [uri("0wXuerDYiBnERgIpbb3JBR")]: {
     title: "Redbone",
     artist: "Childish Gambino",
@@ -144,7 +161,12 @@ const SEED: MockRoomSeed = {
 
 const SERVICES: RoomServices = {
   trackMetadata: {
-    resolve: (trackUri) => Promise.resolve(TRACKS[trackUri] ?? null),
+    resolve: (trackUri) => {
+      const info = TRACKS[trackUri];
+      if (!info) return Promise.resolve(null);
+      const trackId = trackUri.replace("spotify:track:", "");
+      return Promise.resolve({ ...info, durationMs: LENGTHS_MS[trackId] ?? 0 });
+    },
   },
   playlistService: {
     import: () => Promise.reject(new Error("playlist import is off in this preview")),

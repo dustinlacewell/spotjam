@@ -9,16 +9,18 @@ import type { TrackMetadataSource } from "./ports/track-metadata";
 /**
  * How the local player stands relative to the room.
  *
- * - `idle`: the room names no track, so there is nothing to drive.
- * - `following`: this shell drives the local player.
+ * - `attached`: this shell drives the local Spotify player.
  * - `detached`: the user took the player back. Everything but playback goes on.
+ * - `no-spotify`: there is no client to drive. Not a state the user chose, so
+ *   not one they can act on.
  */
-export type PlayerControlState = "idle" | "following" | "detached";
+export type PlayerControlState = "attached" | "detached" | "no-spotify";
 
-/** Reading the local player's control state, and taking it back. */
+/** Reading the local player's control state, and handing it over either way. */
 export interface PlayerControl {
-  subscribe(listener: (control: PlayerControlState) => void): () => void;
+  subscribe(listener: (state: PlayerControlState) => void): () => void;
   attach(): void;
+  detach(): void;
 }
 
 export interface RoomServices {

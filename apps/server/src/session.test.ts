@@ -11,18 +11,20 @@ import { MemoryIdentityStore } from "./identity-store.ts";
 import { ReplayGuard } from "./replay-guard.ts";
 import { RoomRegistry } from "./rooms.ts";
 import { Session } from "./session.ts";
-import { FakeClock, RecordingSocket, seededRng } from "./testing.ts";
+import { FakeClock, FakeTimers, RecordingSocket, seededRng } from "./testing.ts";
 
 const alice = generateKeypair();
 const bob = generateKeypair();
 
 let clock: FakeClock;
+let timers: FakeTimers;
 let rooms: RoomRegistry;
 let identities: MemoryIdentityStore;
 let session: Session;
 
 beforeEach(() => {
   clock = new FakeClock();
+  timers = new FakeTimers();
   rooms = new RoomRegistry();
   identities = new MemoryIdentityStore();
   session = new Session({
@@ -31,6 +33,8 @@ beforeEach(() => {
     replay: new ReplayGuard(),
     clock,
     rng: seededRng(1),
+    // Track ends are scheduled, so a real timer would outlive the test.
+    timers,
   });
 });
 
@@ -182,7 +186,7 @@ describe("rooms", () => {
     send(a.connection, {
       type: "enqueue",
       roomId: "jam",
-      items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1" }],
+      items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: 200_000 }],
     });
 
     const toAlice = lastEvent(a.socket);
@@ -240,7 +244,7 @@ describe("rooms", () => {
     send(connection, {
       type: "enqueue",
       roomId: "jam",
-      items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1" }],
+      items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: 200_000 }],
     });
     send(connection, { type: "set-broadcasting", roomId: "jam", broadcasting: true });
 
@@ -252,6 +256,55 @@ describe("rooms", () => {
       ownerPubkey: alice.publicKey,
       uri: "spotify:track:a1",
     });
+  });
+
+  it("ends a track on the clock and tells every member", () => {
+    const a = authed(alice, "alice");
+    const b = authed(bob, "bob");
+    send(a.connection, { type: "join-room", roomId: "jam" });
+    send(b.connection, { type: "join-room", roomId: "jam" }, bob);
+    send(a.connection, {
+      type: "enqueue",
+      roomId: "jam",
+      items: [
+        { id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: 60_000 },
+        { id: "a2", uri: "spotify:track:a2", trackId: "a2", durationMs: 60_000 },
+      ],
+    });
+    send(a.connection, { type: "set-broadcasting", roomId: "jam", broadcasting: true });
+    a.socket.clear();
+    b.socket.clear();
+
+    // Nobody reports the end of a1; the server's own timer does.
+    expect(timers.pendingDelay).toBe(60_000);
+    clock.advance(60_000);
+    timers.fire();
+
+    for (const socket of [a.socket, b.socket]) {
+      const event = lastEvent(socket);
+      expect(event.type).toBe("room-state");
+      if (event.type !== "room-state") return;
+      expect(event.snapshot.pointer.itemId).toBe("a2");
+    }
+    // And the next track is already armed.
+    expect(timers.pendingDelay).toBe(60_000);
+  });
+
+  it("stops arming once a room is deserted", () => {
+    const { connection } = authed();
+    send(connection, { type: "join-room", roomId: "jam" });
+    send(connection, {
+      type: "enqueue",
+      roomId: "jam",
+      items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: 60_000 }],
+    });
+    send(connection, { type: "set-broadcasting", roomId: "jam", broadcasting: true });
+    expect(timers.pendingCount).toBe(1);
+
+    session.close(connection);
+
+    expect(rooms.has("jam")).toBe(false);
+    expect(timers.pendingCount).toBe(0);
   });
 
   it("rejects an op signed by a key other than the session's", () => {
@@ -268,7 +321,7 @@ describe("public playlists", () => {
   const mix: SharedPlaylist = {
     id: "p1",
     name: "Morning",
-    tracks: [{ uri: "spotify:track:a1", trackId: "a1" }],
+    tracks: [{ uri: "spotify:track:a1", trackId: "a1", durationMs: 200_000 }],
   };
 
   function authed(identity = alice, username = "alice") {
@@ -385,7 +438,7 @@ describe("queries", () => {
     send(a.connection, {
       type: "enqueue",
       roomId: "jam",
-      items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1" }],
+      items: [{ id: "a1", uri: "spotify:track:a1", trackId: "a1", durationMs: 200_000 }],
     });
     // Broadcasting with a track queued starts playback; no kickoff skip needed.
     send(a.connection, { type: "set-broadcasting", roomId: "jam", broadcasting: true });
@@ -448,21 +501,15 @@ describe("queries", () => {
       });
     });
 
-    it("pushes nothing when only playback progress moved", () => {
+    it("pushes nothing when a room moved but its row did not", () => {
       const player = playingRoom();
       const watcher = authed(bob, "bob");
       send(watcher.connection, { type: "watch-rooms" }, bob);
       watcher.socket.clear();
 
+      // A seek moves the pointer without changing the track a browser lists.
       clock.advance(1_000);
-      send(player.connection, {
-        type: "report-progress",
-        roomId: "jam",
-        itemId: "a1",
-        positionMs: 1_000,
-        durationMs: 200_000,
-        sampledAtEpochMs: clock.now(),
-      });
+      send(player.connection, { type: "seek", roomId: "jam", positionMs: 1_000 });
 
       expect(watcher.socket.sent).toHaveLength(0);
     });
@@ -538,7 +585,7 @@ describe("queries", () => {
       send(player.connection, {
         type: "enqueue",
         roomId: "jam",
-        items: [{ id: "a2", uri: "spotify:track:a2", trackId: "a2" }],
+        items: [{ id: "a2", uri: "spotify:track:a2", trackId: "a2", durationMs: 200_000 }],
       });
 
       const event = lastEvent(watcher.socket);
@@ -547,26 +594,22 @@ describe("queries", () => {
       expect(event.snapshot.sessionQueue.map((entry) => entry.item.id)).toEqual(["a2"]);
     });
 
-    it("pushes progress-only changes too", () => {
+    it("pushes a transport-only change too", () => {
       const player = playingRoom();
       const watcher = authed(bob, "bob");
       send(watcher.connection, { type: "watch-room", roomId: "jam" }, bob);
       watcher.socket.clear();
 
       clock.advance(1_000);
-      send(player.connection, {
-        type: "report-progress",
-        roomId: "jam",
-        itemId: "a1",
-        positionMs: 1_000,
-        durationMs: 200_000,
-        sampledAtEpochMs: clock.now(),
-      });
+      send(player.connection, { type: "set-paused", roomId: "jam", paused: true });
 
       const event = lastEvent(watcher.socket);
       expect(event.type).toBe("room-detail");
       if (event.type !== "room-detail") return;
-      expect(event.snapshot.progress?.positionMs).toBe(1_000);
+      expect(event.snapshot.pointer).toMatchObject({
+        isPaused: true,
+        pausedAtOffsetMs: 1_000,
+      });
     });
 
     it("watches one room at a time", () => {

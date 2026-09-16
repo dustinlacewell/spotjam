@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { QueueItem } from "@spotjam/protocol";
+import { positionAt, type QueueItem } from "@spotjam/protocol";
 
 import { describeRoomContract, type RoomHarness } from "../testing";
 import { DEFAULT_DURATION_MS, MockRoom, type MockRoomSeed } from "./mock-room";
@@ -9,8 +9,17 @@ const ME = "me-pubkey";
 const OTHER = "other-pubkey";
 const EPOCH = 1_700_000_000_000;
 
+/**
+ * A seeded track with no length of its own, so the seed's `durations` and
+ * `playing` keys decide it and the default covers the rest.
+ */
 function track(id: string): QueueItem {
-  return { id, uri: `spotify:track:${id}`, trackId: id };
+  return { id, uri: `spotify:track:${id}`, trackId: id, durationMs: 0 };
+}
+
+/** Where a room's pointer sits, read on its own clock. */
+function positionOf(room: MockRoom): number {
+  return positionAt(room.getPlaybackPointer(), room.serverNow());
 }
 
 /** A room with two broadcasters, on a clock the test drives by hand. */
@@ -64,7 +73,7 @@ describe("MockRoom seeding", () => {
     const { room } = makeHarness({ playing: null });
 
     expect(room.getPlaybackPointer().itemId).toBeNull();
-    expect(room.myProgress()).toBeNull();
+    expect(positionOf(room)).toBe(0);
     // No track was consumed, so both queues are whole.
     expect(room.myQueue().map((item) => item.id)).toEqual(["m1", "m2"]);
   });
@@ -75,12 +84,8 @@ describe("MockRoom seeding", () => {
     });
 
     expect(room.getPlaybackPointer().itemId).toBe("o1");
-    expect(room.myProgress()).toEqual({
-      itemId: "o1",
-      positionMs: 30_000,
-      durationMs: 180_000,
-      sampledAtEpochMs: EPOCH,
-    });
+    expect(room.getPlaybackPointer().durationMs).toBe(180_000);
+    expect(positionOf(room)).toBe(30_000);
     // Reaching o1 meant playing m1 first, so it is gone from my queue.
     expect(room.myQueue().map((item) => item.id)).toEqual(["m2"]);
   });
@@ -92,14 +97,14 @@ describe("MockRoom seeding", () => {
 
     expect(harness.room.getPlaybackPointer().isPaused).toBe(true);
     harness.advanceClock(9_000);
-    expect(harness.room.myProgress()?.positionMs).toBe(12_000);
+    expect(positionOf(harness.room)).toBe(12_000);
   });
 
   it("gives an item that becomes current later the default duration", () => {
     const { room } = makeHarness({ playing: { itemId: "m1", durationMs: 100_000 } });
 
     room.skip();
-    expect(room.myProgress()?.durationMs).toBe(DEFAULT_DURATION_MS);
+    expect(room.getPlaybackPointer().durationMs).toBe(DEFAULT_DURATION_MS);
   });
 
   it("takes a later item's length from the `durations` seed", () => {
@@ -110,14 +115,30 @@ describe("MockRoom seeding", () => {
 
     room.skip();
     expect(room.getPlaybackPointer().itemId).toBe("o1");
-    expect(room.myProgress()?.durationMs).toBe(123_000);
+    expect(room.getPlaybackPointer().durationMs).toBe(123_000);
   });
 
-  it("clamps progress to the track's length", () => {
+  it("clamps the position to the track's length", () => {
     const harness = makeHarness({ playing: { itemId: "m1", durationMs: 10_000 } });
 
     harness.advanceClock(60_000);
-    expect(harness.room.myProgress()?.positionMs).toBe(10_000);
+    expect(positionOf(harness.room)).toBe(10_000);
+  });
+
+  it("keeps a seeded item's own length when the seed names none", () => {
+    const { room } = makeHarness({
+      participants: [
+        {
+          pubkey: ME,
+          username: "me",
+          broadcasting: true,
+          queue: [{ ...track("m1"), durationMs: 42_000 }],
+        },
+      ],
+    });
+
+    expect(room.getPlaybackPointer().itemId).toBe("m1");
+    expect(room.getPlaybackPointer().durationMs).toBe(42_000);
   });
 });
 
@@ -139,7 +160,7 @@ describe("MockRoom playback rules", () => {
 
     for (let i = 0; i < 4; i++) room.skip();
     expect(room.getPlaybackPointer().itemId).toBeNull();
-    expect(room.myProgress()).toBeNull();
+    expect(positionOf(room)).toBe(0);
   });
 
   it("interleaves the session queue across broadcasters", () => {
@@ -200,7 +221,10 @@ describe("MockRoom playback rules", () => {
       participants: [{ pubkey: ME, username: "me", broadcasting: false, queue: [track("m1")] }],
     });
 
-    room.appendToMyQueue([{ id: "again", uri: "spotify:track:m1", trackId: "m1" }, track("m2")]);
+    room.appendToMyQueue([
+      { id: "again", uri: "spotify:track:m1", trackId: "m1", durationMs: 0 },
+      track("m2"),
+    ]);
     expect(room.myQueue().map((item) => item.id)).toEqual(["m1", "m2"]);
     room.destroy();
   });

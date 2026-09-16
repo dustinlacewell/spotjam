@@ -27,6 +27,7 @@ pub fn run() {
             spotify::spotify_resume,
             spotify::spotify_seek,
             spotify::spotify_get_state,
+            spotify::spotify_observe,
             spotify::spotify_set_next_track,
             spotify::spotify_clear_queue,
             spotify::spotify_get_queue,

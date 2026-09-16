@@ -1,5 +1,5 @@
 import { Button, Thumbnail } from "@spotjam/ui";
-import type { RoomSnapshot, RoomSummary } from "@spotjam/protocol";
+import { positionAt, type RoomSnapshot, type RoomSummary } from "@spotjam/protocol";
 import type { Connection } from "../lib/connection";
 import { formatClock, useTrackMetadata, SessionQueueList } from "@spotjam/room";
 import { useRoomDetail } from "./use-room-detail";
@@ -56,8 +56,14 @@ function NowPlaying({ snapshot }: { snapshot: RoomSnapshot | null }) {
   const metadata = useTrackMetadata(uri);
   if (snapshot === null || snapshot.pointer.itemId === null) return null;
 
-  const { pointer, progress, participants } = snapshot;
+  const { pointer, participants } = snapshot;
   const owner = participants.find((p) => p.pubkey === pointer.ownerPubkey)?.username;
+
+  // The snapshot is stamped with the server's own clock, so the position is
+  // read at that instant. No offset is needed and none is available: a watcher
+  // has not joined this room, so it folds no clock of its own. The reading is
+  // frozen between pushes, which is what a watcher's readout was before too.
+  const positionMs = positionAt(pointer, snapshot.serverTime);
 
   return (
     <div className={styles.nowPlaying}>
@@ -68,9 +74,9 @@ function NowPlaying({ snapshot }: { snapshot: RoomSnapshot | null }) {
         <div className={styles.artist}>{metadata?.artist ?? " "}</div>
         <div className={styles.meta}>
           {owner !== undefined && <span>from {owner}</span>}
-          {progress !== null && (
+          {pointer.durationMs > 0 && (
             <span>
-              {formatClock(progress.positionMs)} / {formatClock(progress.durationMs)}
+              {formatClock(positionMs)} / {formatClock(pointer.durationMs)}
             </span>
           )}
         </div>

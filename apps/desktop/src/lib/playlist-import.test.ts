@@ -33,8 +33,8 @@ const PLAYLIST: FetchedPlaylist = {
   canAdd: true,
   canEditItems: true,
   tracks: [
-    { uri: "spotify:track:aaaa1111", name: "One", artist: "A", uid: "row-a" },
-    { uri: "spotify:track:bbbb2222", name: "Two", artist: "B", uid: "row-b" },
+    { uri: "spotify:track:aaaa1111", name: "One", artist: "A", uid: "row-a", durationMs: 180_000 },
+    { uri: "spotify:track:bbbb2222", name: "Two", artist: "B", uid: "row-b", durationMs: 240_000 },
   ],
 };
 
@@ -55,10 +55,34 @@ describe("importPlaylist", () => {
       canAdd: true,
       canEditItems: true,
       rows: [
-        { track: { uri: "spotify:track:aaaa1111", trackId: "aaaa1111" }, uid: "row-a" },
-        { track: { uri: "spotify:track:bbbb2222", trackId: "bbbb2222" }, uid: "row-b" },
+        {
+          track: { uri: "spotify:track:aaaa1111", trackId: "aaaa1111", durationMs: 180_000 },
+          uid: "row-a",
+        },
+        {
+          track: { uri: "spotify:track:bbbb2222", trackId: "bbbb2222", durationMs: 240_000 },
+          uid: "row-b",
+        },
       ],
     });
+  });
+
+  /**
+   * The client does not always say. Zero stands for "unknown", and the enqueue
+   * path looks one up rather than sending a zero the server would run out
+   * the instant it started.
+   */
+  it("reads a missing or nonsensical length as zero", async () => {
+    const { invoke } = fakeInvoke({
+      name: "Late night",
+      tracks: [
+        { uri: "spotify:track:aaaa1111", name: "One", artist: "A" },
+        { uri: "spotify:track:bbbb2222", name: "Two", artist: "B", durationMs: -5 },
+      ],
+    });
+    const imported = await importPlaylist(URI, invoke);
+
+    expect(imported.rows.map((row) => row.track.durationMs)).toEqual([0, 0]);
   });
 
   it("carries the playlist id through, so the playlist can stay linked", async () => {

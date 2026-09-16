@@ -1,3 +1,4 @@
+import type { PlaylistTrack } from "@spotjam/protocol";
 import type { Playlist, PlaylistRow, PlaylistSource } from "./playlists";
 
 const STORAGE_KEY = "spotjam.playlists";
@@ -66,26 +67,38 @@ function toPlaylist(stored: StoredPlaylist): Playlist {
  * Playlists stored before rows existed hold bare tracks, which become rows
  * with no Spotify identity — correct, because a uid only ever came from a
  * sync, and the next one restores it.
+ *
+ * A track stored before lengths were kept loads with `durationMs` 0. That is
+ * honest — the length is genuinely unknown — and the enqueue path treats a
+ * zero as "no length" and looks it up rather than sending it.
  */
 function storedRows(stored: StoredPlaylist): PlaylistRow[] {
   if (Array.isArray(stored.rows)) {
     return stored.rows.filter(isRow).map((row) => ({
-      track: { uri: row.track.uri, trackId: row.track.trackId },
+      track: toTrack(row.track),
       ...(typeof row.uid === "string" && row.uid.length > 0 ? { uid: row.uid } : {}),
     }));
   }
   const tracks = Array.isArray(stored.tracks) ? stored.tracks : [];
-  return tracks.filter(isTrack).map((track) => ({
-    track: { uri: track.uri, trackId: track.trackId },
-  }));
+  return tracks.filter(isTrack).map((track) => ({ track: toTrack(track) }));
 }
 
-function isRow(value: unknown): value is { track: { uri: string; trackId: string }; uid?: string } {
+function toTrack(stored: { uri: string; trackId: string; durationMs?: unknown }): PlaylistTrack {
+  return {
+    uri: stored.uri,
+    trackId: stored.trackId,
+    durationMs: typeof stored.durationMs === "number" && stored.durationMs > 0 ? stored.durationMs : 0,
+  };
+}
+
+function isRow(
+  value: unknown,
+): value is { track: { uri: string; trackId: string; durationMs?: unknown }; uid?: string } {
   const row = value as { track?: { uri?: unknown; trackId?: unknown } } | null;
   return typeof row?.track?.uri === "string" && typeof row.track.trackId === "string";
 }
 
-function isTrack(value: unknown): value is { uri: string; trackId: string } {
+function isTrack(value: unknown): value is { uri: string; trackId: string; durationMs?: unknown } {
   const track = value as { uri?: unknown; trackId?: unknown } | null;
   return typeof track?.uri === "string" && typeof track.trackId === "string";
 }
