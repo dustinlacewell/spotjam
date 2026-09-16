@@ -659,6 +659,138 @@ describe("RoomClient queue restore", () => {
   });
 });
 
+describe("RoomClient broadcasting restore", () => {
+  /** Every set-broadcasting payload the live socket has been handed. */
+  function claims(socket: FakeSocket): unknown[] {
+    return socket.payloads().filter((p) => (p as { type: string }).type === "set-broadcasting");
+  }
+
+  /** A snapshot where we are a member, broadcasting or not. */
+  function member(pubkey: string, broadcasting: boolean): RoomSnapshot {
+    return snapshot({
+      participants: [{ pubkey, username: "alice", broadcasting, playlistsRevision: 0 }],
+    });
+  }
+
+  /** Drop the socket, run the retry, and greet the replacement. */
+  async function reconnect(harness: ReturnType<typeof makeRoom>): Promise<void> {
+    harness.latest().drop();
+    harness.runTimer();
+    await greet(harness.latest(), harness.keypair.publicKey);
+  }
+
+  it("re-claims the role when a rejoin comes back not broadcasting", async () => {
+    const harness = makeRoom();
+    await greet(harness.latest(), harness.keypair.publicKey);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, true),
+    });
+    await settle();
+
+    await reconnect(harness);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, false),
+    });
+    await settle();
+
+    expect(claims(harness.latest())).toEqual([
+      { type: "set-broadcasting", roomId: ROOM, broadcasting: true },
+    ]);
+    harness.room.destroy();
+  });
+
+  it("claims nothing for a client that was never broadcasting", async () => {
+    const harness = makeRoom();
+    await greet(harness.latest(), harness.keypair.publicKey);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, false),
+    });
+    await settle();
+
+    await reconnect(harness);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, false),
+    });
+    await settle();
+
+    expect(claims(harness.latest())).toEqual([]);
+    harness.room.destroy();
+  });
+
+  it("claims nothing when the user turned it off before the drop", async () => {
+    const harness = makeRoom();
+    await greet(harness.latest(), harness.keypair.publicKey);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, true),
+    });
+    // Stopping is the user's own decision; the reconnect must respect it.
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, false),
+    });
+    await settle();
+
+    await reconnect(harness);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, false),
+    });
+    await settle();
+
+    expect(claims(harness.latest())).toEqual([]);
+    harness.room.destroy();
+  });
+
+  it("claims nothing when the server still has us broadcasting", async () => {
+    const harness = makeRoom();
+    await greet(harness.latest(), harness.keypair.publicKey);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, true),
+    });
+    await settle();
+
+    await reconnect(harness);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, true),
+    });
+    await settle();
+
+    expect(claims(harness.latest())).toEqual([]);
+    harness.room.destroy();
+  });
+
+  it("claims once, not on every later snapshot", async () => {
+    const harness = makeRoom();
+    await greet(harness.latest(), harness.keypair.publicKey);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, true),
+    });
+    await settle();
+
+    await reconnect(harness);
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, false),
+    });
+    harness.latest().deliver({
+      type: "room-state",
+      snapshot: member(harness.room.myPubkey, false),
+    });
+    await settle();
+
+    expect(claims(harness.latest())).toHaveLength(1);
+    harness.room.destroy();
+  });
+});
+
 describe("RoomClient errors", () => {
   it("surfaces a typed error with copy for the user", async () => {
     const { room, latest } = makeRoom();

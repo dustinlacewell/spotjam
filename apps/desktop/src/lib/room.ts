@@ -73,6 +73,12 @@ export class RoomClient implements Room {
   #view: RoomView = INITIAL_VIEW;
   #closed = false;
 
+  /**
+   * What the last snapshot said about us broadcasting. In memory only — see
+   * `#restoreBroadcasting`.
+   */
+  #wasBroadcasting = false;
+
   readonly #connection: Connection;
   readonly #unsubscribeEvent: () => void;
   readonly #unsubscribeReady: () => void;
@@ -131,6 +137,30 @@ export class RoomClient implements Room {
     saveQueue(this.roomId, snapshot.myQueue);
   }
 
+  /**
+   * Hand the broadcaster role back to a server that forgot we had it.
+   *
+   * A dropped socket makes us a fresh member on rejoin, and a fresh member is
+   * not broadcasting. The role is not something the user asked to give up, so
+   * it is re-claimed on the same first-snapshot-after-join the queue is, and
+   * from the same evidence: what the last snapshot before the drop said about
+   * us.
+   *
+   * Remembered in memory only. A restart of the app must not start
+   * broadcasting on its own, so nothing about this reaches storage.
+   */
+  #restoreBroadcasting(wasSynced: boolean): void {
+    const broadcasting = isBroadcasting(this.#view, this.myPubkey);
+    if (!wasSynced && this.#view.status.synced && this.#wasBroadcasting && !broadcasting) {
+      this.#sendOp(ops.setBroadcasting(this.roomId, true));
+      return;
+    }
+    // Recorded after the decision, never before: the snapshot that provokes
+    // the restore is the one that says we are not broadcasting, and it must
+    // not erase the fact that we were.
+    this.#wasBroadcasting = broadcasting;
+  }
+
   // --- events ------------------------------------------------------------
 
   /** Only this room's news, filtered out of every event the connection sees. */
@@ -157,6 +187,7 @@ export class RoomClient implements Room {
     this.#view = { ...reduced, status: { ...reduced.status, socket: this.#liveSocket() } };
     if (event.type === "room-state") {
       this.#persistQueue(event.snapshot, previousStatus.synced);
+      this.#restoreBroadcasting(previousStatus.synced);
     }
     // Status listeners are a separate channel from onChange, so without this
     // the UI never hears that the socket or the room's sync state changed.

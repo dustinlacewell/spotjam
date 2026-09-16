@@ -37,6 +37,7 @@ export class FakeClock implements Clock {
  */
 export class FakeTimers implements Timers {
   readonly #pending = new Map<number, { callback: () => void; delayMs: number }>();
+  readonly #repeating = new Map<number, { callback: () => void; periodMs: number }>();
   #nextId = 1;
 
   set(callback: () => void, delayMs: number): TimerHandle {
@@ -47,6 +48,30 @@ export class FakeTimers implements Timers {
 
   clear(handle: TimerHandle): void {
     this.#pending.delete(handle as number);
+  }
+
+  repeat(callback: () => void, periodMs: number): TimerHandle {
+    const id = this.#nextId++;
+    this.#repeating.set(id, { callback, periodMs });
+    return id;
+  }
+
+  stopRepeat(handle: TimerHandle): void {
+    this.#repeating.delete(handle as number);
+  }
+
+  get repeatingCount(): number {
+    return this.#repeating.size;
+  }
+
+  /** The period the newest live repeating timer runs on. */
+  get repeatingPeriod(): number | null {
+    return [...this.#repeating.values()].at(-1)?.periodMs ?? null;
+  }
+
+  /** Run every live repeating timer once, as the host would on each period. */
+  tick(): void {
+    for (const entry of [...this.#repeating.values()]) entry.callback();
   }
 
   get pendingCount(): number {

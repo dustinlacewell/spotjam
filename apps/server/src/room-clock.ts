@@ -18,10 +18,18 @@ import type { RoomRegistry } from "./rooms.ts";
 /** A pending timer, as the host hands it back. Opaque to this module. */
 export type TimerHandle = unknown;
 
-/** The timer pair, shaped like the globals so production is a straight pass. */
+/**
+ * The timer functions, shaped like the globals so production is a straight pass.
+ *
+ * `set`/`clear` are the one-shot pair this clock uses. `repeat`/`stopRepeat`
+ * are the recurring pair the heartbeat uses; they are named apart because the
+ * host's own handles are not interchangeable between the two.
+ */
 export interface Timers {
   set(callback: () => void, delayMs: number): TimerHandle;
   clear(handle: TimerHandle): void;
+  repeat(callback: () => void, periodMs: number): TimerHandle;
+  stopRepeat(handle: TimerHandle): void;
 }
 
 export interface RoomClockDeps {
@@ -36,6 +44,8 @@ export interface RoomClockDeps {
 export const nodeTimers: Timers = {
   set: (callback, delayMs) => setTimeout(callback, delayMs),
   clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  repeat: (callback, periodMs) => setInterval(callback, periodMs),
+  stopRepeat: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
 };
 
 export class RoomClock {

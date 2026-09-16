@@ -8,11 +8,13 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { newConnection } from "./connections.ts";
+import { startHeartbeat, type PingableServer } from "./heartbeat.ts";
 import type { IdentityStore } from "./identity-store.ts";
 import { MemoryManifestStore, type ManifestStore } from "./manifest-store.ts";
 import { systemClock, type Clock, type Rng } from "./ports.ts";
 import { mergeManifest, parseUpdate } from "./release-manifest.ts";
 import { ReplayGuard } from "./replay-guard.ts";
+import { nodeTimers, type Timers } from "./room-clock.ts";
 import { RoomRegistry } from "./rooms.ts";
 import { Session } from "./session.ts";
 
@@ -29,6 +31,7 @@ export interface ServerOptions {
   releaseToken?: string | undefined;
   clock?: Clock;
   rng?: Rng;
+  timers?: Timers;
 }
 
 export interface RunningServer {
@@ -47,6 +50,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const rooms = new RoomRegistry();
   const manifests = options.manifests ?? new MemoryManifestStore();
   const clock = options.clock ?? systemClock;
+  const timers = options.timers ?? nodeTimers;
 
   const session = new Session({
     rooms,
@@ -54,12 +58,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     replay: new ReplayGuard(),
     clock,
     rng: options.rng ?? Math.random,
+    timers,
   });
 
   const http = createServer(
     httpHandler({ manifests, releaseToken: options.releaseToken, clock }),
   );
   const wss = new WebSocketServer({ server: http });
+
+  // Nothing is sent down an idle room's socket, and the tunnel in front of this
+  // server closes what looks idle. The ping is what keeps it open.
+  const heartbeat = startHeartbeat({ server: wss as unknown as PingableServer, timers });
 
   wss.on("connection", (socket: WebSocket) => {
     const connection = newConnection(socket);
@@ -80,7 +89,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     port: addressPort(http, port),
     rooms,
     close: async () => {
-      // Pending track-end timers would otherwise keep the process alive.
+      // Pending track-end timers and the heartbeat interval would otherwise
+      // keep the process alive.
+      heartbeat.stop();
       session.stop();
       await shutdown(http, wss);
     },
