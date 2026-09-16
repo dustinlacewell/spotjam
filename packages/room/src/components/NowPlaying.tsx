@@ -2,6 +2,9 @@ import { Pause, Play, SkipForward } from "lucide-react";
 import { IconButton, ProgressBar, Thumbnail } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
 import { formatClock } from "../lib/progress";
+import { toPlaylistTracks } from "../lib/selection";
+import { TrackContextMenu } from "./TrackContextMenu";
+import { useTrackContextMenu } from "./use-track-context-menu";
 import { useTrackMetadata } from "./use-track-metadata";
 import styles from "./NowPlaying.module.css";
 
@@ -24,6 +27,7 @@ export function NowPlaying({
   onSeek: (positionMs: number) => void;
 }) {
   const metadata = useTrackMetadata(item?.uri ?? "");
+  const menu = useTrackContextMenu();
 
   if (item === null) {
     return (
@@ -40,7 +44,12 @@ export function NowPlaying({
   }
 
   return (
-    <div className={styles.hero}>
+    <div
+      className={styles.hero}
+      // The hero names one track, so the menu acts on that one wherever in it
+      // the click lands — there is no selection here to read.
+      onContextMenu={(e) => menu.open(e, toPlaylistTracks([item]))}
+    >
       <Thumbnail src={metadata?.thumbnailUrl ?? null} size={96} radius="md" />
       <div className={styles.info}>
         <div className={isPaused ? styles.labelIdle : styles.label}>
@@ -72,6 +81,8 @@ export function NowPlaying({
           <SkipForward size={16} strokeWidth={2} />
         </IconButton>
       </div>
+
+      <TrackContextMenu at={menu.at} tracks={menu.tracks} onClose={menu.close} />
     </div>
   );
 }
