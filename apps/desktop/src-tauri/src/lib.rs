@@ -2,6 +2,7 @@ mod identity;
 mod spotify;
 
 use spotify::SpotifyBridge;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,8 +11,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(SpotifyBridge::new())
+        .setup(|app| {
+            // The bridge connects on its own from here on, so the front end
+            // learns about Spotify without having to ask.
+            let bridge = SpotifyBridge::new();
+            bridge.start(app.handle().clone());
+            app.manage(bridge);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            spotify::spotify_bridge_state,
+            spotify::spotify_connect,
             spotify::spotify_play_track,
             spotify::spotify_pause,
             spotify::spotify_resume,

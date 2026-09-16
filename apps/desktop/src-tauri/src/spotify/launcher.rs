@@ -1,41 +1,46 @@
+//! Finding and starting the Spotify executable.
+//!
+//! Spawning only. Waiting for the debug port to come up is the session's
+//! job, so this returns as soon as the process is handed to the OS.
+
 use anyhow::{anyhow, Result};
-use serde::Deserialize;
-use std::time::Duration;
 
 const DEBUG_PORT: u16 = 9222;
 
-#[derive(Deserialize)]
-struct TargetInfo {
-    #[serde(rename = "type")]
-    target_type: String,
-    #[serde(rename = "webSocketDebuggerUrl")]
-    web_socket_debugger_url: String,
-}
-
-/// Launches Spotify.exe with remote debugging enabled if it isn't already
-/// listening, then returns the WebSocket URL of its main page target.
-pub async fn ensure_running_and_get_page_ws_url() -> Result<String> {
-    if let Ok(url) = find_page_ws_url().await {
-        return Ok(url);
-    }
-
+/// Starts Spotify with remote debugging enabled.
+///
+/// Spotify is single-instance: if one is already running, this process exits
+/// immediately and changes nothing. Only call it when no Spotify is running.
+pub fn spawn_spotify() -> Result<()> {
     let spotify_exe = spotify_executable()?;
 
-    tokio::process::Command::new(&spotify_exe)
+    let child = std::process::Command::new(&spotify_exe)
         .arg(format!("--remote-debugging-port={DEBUG_PORT}"))
         .spawn()
         .map_err(|e| anyhow!("failed to launch {spotify_exe}: {e}"))?;
 
-    for _ in 0..30 {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        if let Ok(url) = find_page_ws_url().await {
-            return Ok(url);
-        }
-    }
+    // Dropped on purpose: the thread outlives this call, which is the point.
+    let _ = reap(child);
+    Ok(())
+}
 
-    Err(anyhow!(
-        "Spotify launched but debug port {DEBUG_PORT} never became ready"
-    ))
+/// Stops a launched Spotify from becoming our problem after it exits.
+///
+/// Dropping a `Child` does not wait on it. On Unix the process then stays a
+/// zombie in our process table until the app exits, and on Windows we keep its
+/// handle open. Neither matters once — but the supervisor calls this on every
+/// attempt that finds no Spotify and a closed port, which is every retry while
+/// Spotify is slow to start or the user has it uninstalled. A long session
+/// accumulates one per retry.
+///
+/// Waiting cannot happen here: Spotify outlives the call by design, and the
+/// launcher must return as soon as the process is handed to the OS. So a
+/// detached thread does the waiting. One blocked thread per launch is the cost;
+/// it ends when that Spotify does.
+/// Returns the waiting thread's handle so a test can prove the wait happens.
+/// The launcher drops it: nothing in the app has a reason to join.
+fn reap(mut child: std::process::Child) -> std::thread::JoinHandle<Option<std::process::ExitStatus>> {
+    std::thread::spawn(move || child.wait().ok())
 }
 
 // Spotify ships two ways on Windows: the Win32 installer drops it under
@@ -114,15 +119,97 @@ fn spotify_executable() -> Result<String> {
     Ok("spotify".to_string())
 }
 
-async fn find_page_ws_url() -> Result<String> {
-    let targets: Vec<TargetInfo> = reqwest::get(format!("http://127.0.0.1:{DEBUG_PORT}/json"))
-        .await?
-        .json()
-        .await?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    targets
-        .into_iter()
-        .find(|t| t.target_type == "page")
-        .map(|t| t.web_socket_debugger_url)
-        .ok_or_else(|| anyhow!("no page target found on debug port {DEBUG_PORT}"))
+    /// A `Child` that is dropped without a wait is never collected: on Unix
+    /// the exited process stays a zombie in our process table until the app
+    /// exits. The supervisor spawns once per retry while Spotify is missing,
+    /// so an unreaped launch is a leak that grows with the session.
+    ///
+    /// The fix is a wait, and this is what proves one happens: the reaper
+    /// yields the child's exit status. A `reap` that merely dropped the child
+    /// would have no status to yield.
+    #[test]
+    fn a_launched_process_is_waited_on_rather_than_dropped() {
+        let status = reap(short_lived_process())
+            .join()
+            .expect("the reaping thread must not panic");
+
+        assert!(
+            status.is_some(),
+            "no exit status came back, so nothing waited on the child and the \
+             process was left for the OS to hold"
+        );
+    }
+
+    /// The reaper must not block its caller. The launcher returns as soon as
+    /// the process is handed to the OS, because Spotify takes seconds to open
+    /// its port and the session does the waiting.
+    #[test]
+    fn reaping_does_not_block_the_launcher() {
+        let child = long_lived_process();
+        let pid = child.id();
+
+        let started = std::time::Instant::now();
+        let handle = reap(child);
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "reap blocked for {elapsed:?}; it must hand the wait to a thread"
+        );
+
+        kill(pid);
+        let _ = handle.join();
+    }
+
+    #[cfg(target_os = "windows")]
+    fn short_lived_process() -> std::process::Child {
+        std::process::Command::new("cmd")
+            .args(["/C", "exit"])
+            .spawn()
+            .expect("cmd is present on every Windows host")
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn short_lived_process() -> std::process::Child {
+        std::process::Command::new("true")
+            .spawn()
+            .expect("true is present on every POSIX host")
+    }
+
+    // `ping` rather than `timeout`: `timeout` refuses a redirected stdin, and
+    // on a host with Git Bash on PATH the name resolves to the POSIX tool,
+    // which rejects Windows' `/T` syntax.
+    #[cfg(target_os = "windows")]
+    fn long_lived_process() -> std::process::Child {
+        std::process::Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1 > nul"])
+            .spawn()
+            .expect("cmd is present on every Windows host")
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn long_lived_process() -> std::process::Child {
+        std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep is present on every POSIX host")
+    }
+
+    #[cfg(target_os = "windows")]
+    fn kill(pid: u32) {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn kill(pid: u32) {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .output();
+    }
 }

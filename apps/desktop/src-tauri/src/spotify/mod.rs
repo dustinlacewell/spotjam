@@ -1,28 +1,62 @@
+//! The Tauri-facing surface of the Spotify bridge.
+//!
+//! Every command is a thin wrapper: it borrows the live CDP client from the
+//! session and hands it to one of the api modules. The session owns when
+//! there is a client at all.
+
 mod cdp;
 mod launcher;
 mod player_api;
 mod playlist_api;
 mod registry;
+mod session;
+mod target;
 mod track_api;
 
 pub use player_api::PlayerState;
 pub use playlist_api::{PlaylistContents, PlaylistError, RowRef};
+pub use session::BridgeState;
 pub use track_api::TrackMetadata;
 
 use cdp::CdpClient;
-use tokio::sync::Mutex;
+use session::BridgeSession;
+use std::sync::Arc;
 
-/// Owns the lazily-established CDP connection to the local Spotify client.
-/// One bridge per app instance; reconnects on demand if the connection drops.
+/// The app's handle on the Spotify connection.
+///
+/// A shared handle, not an owner: the session behind it lives in a
+/// supervisor task that connects and reconnects on its own.
+#[derive(Clone)]
 pub struct SpotifyBridge {
-    client: Mutex<Option<CdpClient>>,
+    session: Arc<BridgeSession>,
 }
 
 impl SpotifyBridge {
     pub fn new() -> Self {
         Self {
-            client: Mutex::new(None),
+            session: Arc::new(BridgeSession::new()),
         }
+    }
+
+    /// Starts the supervisor and reports state changes to the front end.
+    /// Called once, from the app's setup.
+    pub fn start(&self, app: tauri::AppHandle) {
+        use tauri::Emitter;
+
+        let mut states = self.session.subscribe();
+        // Setup runs outside any Tokio context; Tauri's runtime is the one
+        // that exists here.
+        tauri::async_runtime::spawn(async move {
+            // Emit once up front so a window that opens late is not left
+            // guessing until the next transition.
+            let _ = app.emit("spotify-bridge", BridgeEvent::of(*states.borrow()));
+            while states.changed().await.is_ok() {
+                let state = *states.borrow_and_update();
+                let _ = app.emit("spotify-bridge", BridgeEvent::of(state));
+            }
+        });
+
+        self.session.clone().spawn_supervisor();
     }
 
     async fn with_client<T>(
@@ -32,37 +66,9 @@ impl SpotifyBridge {
         )
             -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<T>> + Send + 'a>>,
     ) -> Result<T, String> {
-        let mut guard = self.client.lock().await;
-        if guard.is_none() {
-            let ws_url = launcher::ensure_running_and_get_page_ws_url()
-                .await
-                .map_err(|e| e.to_string())?;
-            let client = CdpClient::connect(&ws_url).await.map_err(|e| e.to_string())?;
-            *guard = Some(client);
-        }
-
-        let client = guard.as_ref().unwrap();
-        match f(client).await {
-            Ok(value) => Ok(value),
-            Err(e) => {
-                // Connection may have gone stale (Spotify restarted); drop it
-                // so the next call reconnects.
-                *guard = None;
-                Err(e.to_string())
-            }
-        }
+        self.session.with_client(f).await
     }
 
-    /// Like `with_client`, for a call that reports its own typed failure.
-    ///
-    /// `with_client` flattens every error to a string, which is exactly what a
-    /// playlist fetch must not do: "this playlist is gone" and "Spotify is not
-    /// answering" drive opposite actions. Getting to the client can itself
-    /// fail, and that is always unreachable — no answer means no verdict about
-    /// the playlist.
-    ///
-    /// The stale connection is dropped only on an unreachable failure. A
-    /// `Gone` answer means the client talked to us, so the connection is fine.
     async fn with_client_typed<T>(
         &self,
         f: impl for<'a> FnOnce(
@@ -71,23 +77,9 @@ impl SpotifyBridge {
             Box<dyn std::future::Future<Output = Result<T, PlaylistError>> + Send + 'a>,
         >,
     ) -> Result<T, PlaylistError> {
-        let mut guard = self.client.lock().await;
-        if guard.is_none() {
-            let ws_url = launcher::ensure_running_and_get_page_ws_url()
-                .await
-                .map_err(PlaylistError::unreachable_from)?;
-            let client = CdpClient::connect(&ws_url)
-                .await
-                .map_err(PlaylistError::unreachable_from)?;
-            *guard = Some(client);
-        }
-
-        let client = guard.as_ref().unwrap();
-        let result = f(client).await;
-        if matches!(result, Err(PlaylistError::Unreachable { .. })) {
-            *guard = None;
-        }
-        result
+        self.session
+            .with_client_typed(f, PlaylistError::unreachable_from, PlaylistError::message)
+            .await
     }
 }
 
@@ -95,6 +87,40 @@ impl Default for SpotifyBridge {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The `spotify-bridge` event payload. An object rather than a bare string,
+/// so a later field does not break the listener.
+#[derive(serde::Serialize, Clone)]
+struct BridgeEvent {
+    state: String,
+}
+
+impl BridgeEvent {
+    fn of(state: BridgeState) -> Self {
+        Self {
+            state: state.to_string(),
+        }
+    }
+}
+
+/// What the bridge can do right now.
+#[tauri::command]
+pub async fn spotify_bridge_state(
+    bridge: tauri::State<'_, SpotifyBridge>,
+) -> Result<BridgeState, String> {
+    Ok(bridge.session.state())
+}
+
+/// Tries to connect once, now, and reports where that left the bridge.
+///
+/// For a user who has just started Spotify and does not want to wait out the
+/// supervisor's backoff.
+#[tauri::command]
+pub async fn spotify_connect(
+    bridge: tauri::State<'_, SpotifyBridge>,
+) -> Result<BridgeState, String> {
+    Ok(bridge.session.connect().await)
 }
 
 #[tauri::command]

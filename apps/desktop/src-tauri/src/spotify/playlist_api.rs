@@ -93,6 +93,14 @@ impl PlaylistError {
     pub(super) fn unreachable_from(error: impl std::fmt::Display) -> Self {
         Self::unreachable(error)
     }
+
+    /// The failure text, for the session to judge whether the connection
+    /// itself has stopped meaning anything.
+    pub(super) fn message(&self) -> String {
+        match self {
+            Self::Gone { message } | Self::Unreachable { message } => message.clone(),
+        }
+    }
 }
 
 /// Classifies what the page-side fetch reported as its failure.

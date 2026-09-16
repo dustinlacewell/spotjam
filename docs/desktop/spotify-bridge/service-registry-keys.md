@@ -20,7 +20,9 @@ const playerApi = registry.resolve(Symbol.for("PlayerAPI"));
 ```
 
 `player_api.rs` and `playlist_api.rs` each hold one such script and stash
-the resolved service on `window` for reuse.
+the resolved service on `window` for reuse. The stash dies with `window`
+on an xpui reload; `connection-lifecycle.md` describes how the bridge
+waits for React to mount before it injects again.
 
 ## Do not read keys from webpack modules
 

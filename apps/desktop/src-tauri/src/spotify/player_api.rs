@@ -109,15 +109,7 @@ pub async fn get_state(cdp: &CdpClient) -> Result<PlayerState> {
 pub async fn set_next_track(cdp: &CdpClient, uri: String) -> Result<()> {
     ensure_player_api(cdp).await?;
     let uri_json = serde_json::to_string(&uri)?;
-    let expr = format!(
-        r#"(async () => {{
-            const api = window.__playerApi;
-            await api.clearQueue();
-            await api.addToQueue([{{ uri: {uri_json} }}]);
-            return true;
-        }})()"#
-    );
-    cdp.evaluate(&expr).await?;
+    cdp.evaluate(&set_next_track_js(&uri_json)).await?;
     Ok(())
 }
 
@@ -131,9 +123,28 @@ pub async fn clear_queue(cdp: &CdpClient) -> Result<()> {
 
 /// Returns the URIs of the user-queued tracks, in play order.
 ///
-/// Note that Spotify serves `getQueue()` from a cache refreshed by player
-/// events, so a read issued in the same evaluation as a queue write still
-/// sees the pre-write value. Reading in its own call, as here, is correct.
+/// `getQueue()` is not a request. Read off the live client: `PlayerAPI` has
+/// `getQueue(){return this._queue.getQueue()}` and the inner one is
+/// `getQueue(){return this._queueState}` — a plain field, synchronous, with no
+/// round trip to ask. Two reads in a row hand back the identical object
+/// (verified: `a === b`).
+///
+/// That field is written only by the client's own queue subscription, and the
+/// callback debounces: when the incoming state has no current context track or
+/// an empty `nextTracks`, it defers the update by 500 ms rather than applying
+/// it at once. So a read taken just after a write sees the value from before
+/// the write, and the gap is up to half a second.
+///
+/// The caller that matters is the sync driver, which reads the queue each tick
+/// to decide whether to re-issue `set_next_track`. Its 2 s poll clears the
+/// debounce easily. Its room-change hook does not throttle, so two ticks can
+/// land inside one debounce window; the second reads a queue that does not yet
+/// show the first's write and re-issues it. That re-issue is a clear-then-add
+/// of the same URI, which converges on the same one-item queue — so it costs a
+/// redundant write, not a corrupted queue.
+///
+/// Awaiting `set_next_track` does not close the window: its promise settles on
+/// the write reaching the client, not on the cache catching up.
 pub async fn get_queue(cdp: &CdpClient) -> Result<Vec<String>> {
     ensure_player_api(cdp).await?;
     let value: Value = cdp
@@ -161,4 +172,65 @@ fn non_negative_u64(value: &Value) -> u64 {
         .as_u64()
         .or_else(|| value.as_f64().map(|f| f.max(0.0) as u64))
         .unwrap_or(0)
+}
+
+/// Builds the `set_next_track` expression. Split out so the shape that makes a
+/// repeated call harmless can be asserted without a page.
+fn set_next_track_js(uri_json: &str) -> String {
+    format!(
+        r#"(async () => {{
+            const api = window.__playerApi;
+            await api.clearQueue();
+            await api.addToQueue([{{ uri: {uri_json} }}]);
+            return true;
+        }})()"#
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `getQueue()` reads a cached field whose refresh debounces by up to
+    /// 500 ms (read off the live client), and the sync driver's room-change
+    /// hook can tick twice inside that window. The second tick then sees its
+    /// own write missing and issues `set_next_track` again.
+    ///
+    /// That is safe only because the call clears before it adds. `addToQueue`
+    /// mints a fresh uid every time, so an add alone would stack duplicates
+    /// and the user's queue would grow by one on every redundant tick.
+    /// Clear-then-add converges on the same one-item queue instead.
+    #[test]
+    fn setting_the_next_track_clears_before_it_adds() {
+        let js = set_next_track_js(r#""spotify:track:abc""#);
+        let clear = js.find("clearQueue").expect("the call must clear the queue");
+        let add = js.find("addToQueue").expect("the call must add the track");
+        assert!(
+            clear < add,
+            "clearQueue must run before addToQueue, or a repeated call stacks \
+             duplicate queue entries"
+        );
+        assert!(
+            js.contains("await api.clearQueue()"),
+            "the clear must be awaited, or the add can race it"
+        );
+    }
+
+    /// The URI reaches the page as JSON, so a title with a quote in it cannot
+    /// break out of the expression.
+    #[test]
+    fn the_track_uri_is_escaped_into_the_expression() {
+        let uri_json = serde_json::to_string(r#"spotify:track:a"); alert(1); ("#).unwrap();
+        let js = set_next_track_js(&uri_json);
+        assert!(js.contains(r#"\"); alert(1); (""#));
+        assert!(!js.contains(r#"a"); alert(1); ("#));
+    }
+
+    #[test]
+    fn a_missing_or_negative_duration_reads_as_zero() {
+        assert_eq!(non_negative_u64(&Value::Null), 0);
+        assert_eq!(non_negative_u64(&serde_json::json!(-5)), 0);
+        assert_eq!(non_negative_u64(&serde_json::json!(1234.7)), 1234);
+        assert_eq!(non_negative_u64(&serde_json::json!(1234)), 1234);
+    }
 }
