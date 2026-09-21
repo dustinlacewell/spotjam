@@ -135,8 +135,11 @@ mod proto {
         pub album: Option<Album>,
         #[prost(message, repeated, tag = "4")]
         pub artist: Vec<Artist>,
-        /// Milliseconds. Plain `int32` in spotify.metadata, not zigzag.
-        #[prost(int32, optional, tag = "7")]
+        /// Milliseconds. The client encodes this as `sint32` — zigzag-varint, not
+        /// plain `int32` — so reading it as int32 doubles every positive value
+        /// (verified live on client 1.2.95: the raw varints 640,200 and 717,650
+        /// decode to 320,100 and 358,825, both matching `getState().duration`).
+        #[prost(sint32, optional, tag = "7")]
         pub duration: Option<i32>,
     }
 
@@ -173,7 +176,9 @@ mod proto {
 mod tests {
     use super::*;
 
-    /// `spotify:track:582gpRUX6LEVXbuCdgIDaq` as the client returned it.
+    /// `spotify:track:582gpRUX6LEVXbuCdgIDaq` as the client returned it. Tag 7
+    /// carries the zigzag varint 717,650 — a `sint32` encoding of 358,825 ms,
+    /// the length `getState().duration` reports for the same track on 1.2.95.
     const CYBERBIRD: &str = "ChCoixEwFzVLFKxvXxBSibWiEhXjgrXjgqTjg5Djg7zjg5Djg7zjg4ka7wEKENXFoXI2iEBehYqEVFoyUqgSLeaUu+auu+apn+WLlemaiiBTVEFORCBBTE9ORSBDT01QTEVY44CATy5TLlQuMhoeChALOzYPgTJJlbeUAuzAyTPyEgpZb2tvIEthbm5vIAEqCUZseWluZ0RvZzIHCLYfEAYYPIoBYAoeChSrZ2FtAAAeAs/9PXstOD6TkesvGBAAGNgEINgECh4KFKtnYW0AAEhRz/09ey04PpOR6y8YEAEYgAEggAEKHgoUq2dhbQAAsnPP/T17LTg+k5HrLxgQAhiACiCACsoBEgoQ4gIem406QSS9/IOTb8swmiIiChA5gaKBFvxCb4dGW8ZHQ+XgEg5HYWJyaWVsYSBSb2JpbigCMAI40uYrQFhSFAoEaXNyYxIMSlBWSTAwNDE4NDEwYhgKFCk6dNARRVdY64giboYsbGTpjs3FEAJiGAoUD80Q9tENbcPPsx5WvTpoE2I9NFIQAWIYChSJ9IVhj+Q99avYVXCW2S6EiLAe9BAAYhgKFE48OzWz1aHnpJA1F0yniSSi5l0rEAh6GAoUbHx18MVVumqLSxnECZ4kMwx0VgIQBogBsKXv6gWQAQGqARIKEOICHpuNOkEkvfyDk2/LMJqyAQJlbsIBFAoQUFBBuMFMT8unTOxABRikNBAB2gEV44K144Kk44OQ44O844OQ44O844OJggIkChA5gaKBFvxCb4dGW8ZHQ+XgEg5HYWJyaWVsYSBSb2JpbhgBogIkc3BvdGlmeTp0cmFjazo1ODJncFJVWDZMRVZYYnVDZGdJRGFxugIuCiwYA1IoCiRlMjAyMWU5Yi04ZDNhLTQxMjQtYmRmYy04MzkzNmZjYjMwOWEQA8oCFgoUChBQUEG4wUxPy6dM7EAFGKQ0EAHYAgDiAg4SDAiLvJ7qBRDA7+u9Aw==";
 
     #[test]
@@ -185,7 +190,18 @@ mod tests {
             metadata.thumbnail_url.as_deref(),
             Some("https://i.scdn.co/image/ab67616d0000b273cffd3d7b2d383e9391eb2f18")
         );
-        assert_eq!(metadata.duration_ms, 717_650);
+        assert_eq!(metadata.duration_ms, 358_825);
+    }
+
+    /// Tag 7 is zigzag (`sint32`), so a plain-int32 reading doubles every
+    /// positive duration. Pin the decode against the live client's own
+    /// `getState().duration` (358,825 for this track on 1.2.95): a decode that
+    /// reports 717,650 again regresses loudly here.
+    #[test]
+    fn the_zigzag_duration_does_not_double() {
+        let metadata = decode_track(CYBERBIRD).unwrap();
+        assert_eq!(metadata.duration_ms, 358_825);
+        assert_ne!(metadata.duration_ms, 717_650);
     }
 
     #[test]
