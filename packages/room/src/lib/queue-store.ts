@@ -14,9 +14,11 @@ export function loadQueue(roomId: string): QueueItem[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    // One bad entry means the stored copy is not what it claims to be, so
-    // none of it is trusted -- a partial queue restore is worse than none.
-    return parsed.every(isQueueItem) ? parsed : [];
+    // An entry that would not survive the server's own validation is dropped
+    // on its own, rather than discarding the whole queue: the restore is sent
+    // as one enqueue op, and the server rejects the entire array if any item
+    // in it fails `isQueueItem` -- the queue would then be lost for good.
+    return parsed.filter(isQueueItem);
   } catch {
     return [];
   }
@@ -34,11 +36,24 @@ function keyFor(roomId: string): string {
   return `spotjam.queue.${roomId}`;
 }
 
+/**
+ * The same shape the server demands (apps/server `handle-op.ts`): it rejects
+ * a whole enqueue op when any item fails this check, so a stored entry the
+ * server would refuse must never reach it. `durationMs` in particular is
+ * what the server advances the playback pointer with -- a missing, zero, or
+ * fractional one stalls the room, so it is not a cosmetic field.
+ */
 function isQueueItem(value: unknown): value is QueueItem {
   const item = value as Partial<QueueItem> | null;
   return (
     typeof item?.id === "string" &&
+    item.id !== "" &&
     typeof item.uri === "string" &&
-    typeof item.trackId === "string"
+    item.uri !== "" &&
+    typeof item.trackId === "string" &&
+    item.trackId !== "" &&
+    typeof item.durationMs === "number" &&
+    Number.isInteger(item.durationMs) &&
+    item.durationMs > 0
   );
 }

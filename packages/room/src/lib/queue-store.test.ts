@@ -3,7 +3,12 @@ import { loadQueue, saveQueue } from "./queue-store";
 
 const ROOM = "jam";
 const KEY = `spotjam.queue.${ROOM}`;
-const ITEM = { id: "i1", uri: "spotify:track:aaaa1111", trackId: "aaaa1111" };
+const ITEM = {
+  id: "i1",
+  uri: "spotify:track:aaaa1111",
+  trackId: "aaaa1111",
+  durationMs: 214000,
+};
 
 /** The store reads a global `localStorage`; node has none, so stand one up. */
 function fakeStorage() {
@@ -51,8 +56,45 @@ describe("queue store", () => {
     expect(loadQueue(ROOM)).toEqual([]);
   });
 
-  it("is empty when any entry is malformed", () => {
-    localStorage.setItem(KEY, JSON.stringify([ITEM, { id: "i2", uri: "u2" }]));
+  it("drops entries the server would reject, keeping the rest", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([
+        ITEM,
+        { id: "i2", uri: "u2", trackId: "t2" }, // no durationMs
+        { ...ITEM, id: "i3", durationMs: 0 }, // zero
+        { ...ITEM, id: "i4", durationMs: 1.5 }, // fractional
+      ]),
+    );
+    expect(loadQueue(ROOM)).toEqual([ITEM]);
+  });
+
+  it("is empty when every entry is malformed", () => {
+    localStorage.setItem(KEY, JSON.stringify([{ id: "i2", uri: "u2" }]));
+    expect(loadQueue(ROOM)).toEqual([]);
+  });
+
+  it("drops entries with empty-string id, uri, or trackId", () => {
+    // The server's isQueueItem requires isNonEmptyString for these; an
+    // empty-string entry that passed client validation would get the whole
+    // restore array rejected and wipe the stored queue.
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([
+        { ...ITEM, id: "" },
+        { ...ITEM, uri: "" },
+        { ...ITEM, trackId: "" },
+        ITEM,
+      ]),
+    );
+    expect(loadQueue(ROOM)).toEqual([ITEM]);
+  });
+
+  it("never hands back an entry without a positive integer durationMs", () => {
+    // The restore is sent as one enqueue op; the server rejects the whole
+    // array when any item fails its own isQueueItem, and the empty snapshot
+    // after that rejection would overwrite the stored copy for good.
+    localStorage.setItem(KEY, JSON.stringify([{ ...ITEM, durationMs: -5 }]));
     expect(loadQueue(ROOM)).toEqual([]);
   });
 
