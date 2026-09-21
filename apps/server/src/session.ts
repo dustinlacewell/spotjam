@@ -153,7 +153,7 @@ export class Session {
       return null;
     }
 
-    if (!this.#deps.replay.admit(opened.nonce, now)) {
+    if (!this.#deps.replay.admit(opened.nonce, now, (parsed as Envelope).timestamp)) {
       send(connection, error("replay", "Envelope nonce was already used."));
       return null;
     }

@@ -28,7 +28,7 @@ const DEFAULT_MAX_ENTRIES = 100_000;
 export class ReplayGuard {
   readonly #windowMs: number;
   readonly #maxEntries: number;
-  /** nonce -> epoch ms first seen. Insertion order is chronological. */
+  /** nonce -> epoch ms when the entry may be forgotten. Insertion order is chronological. */
   readonly #seen = new Map<string, number>();
 
   constructor(options: ReplayGuardOptions = {}) {
@@ -39,16 +39,22 @@ export class ReplayGuard {
   /**
    * Record a nonce. True when it is fresh, false when it is a replay.
    *
-   * A replay does not refresh the stored timestamp: the original sighting
+   * `timestamp` is the envelope's own sender-stamped time. A future-dated
+   * envelope stays signature-valid until `timestamp + windowMs`, which can be
+   * long after its arrival instant has passed through the window — so the
+   * entry's expiry is the *later* of the two: the nonce is remembered until
+   * the envelope itself can no longer be replayed.
+   *
+   * A replay does not refresh the stored expiry: the original sighting
    * decides when the entry expires, so a repeated nonce cannot pin an entry
    * in memory forever.
    */
-  admit(nonce: string, now: number): boolean {
+  admit(nonce: string, now: number, timestamp: number): boolean {
     this.evictExpired(now);
 
     if (this.#seen.has(nonce)) return false;
 
-    this.#seen.set(nonce, now);
+    this.#seen.set(nonce, Math.max(now, timestamp) + this.#windowMs);
     this.evictOverflow();
     return true;
   }
@@ -59,18 +65,17 @@ export class ReplayGuard {
   }
 
   /**
-   * Drop everything first seen longer ago than the window.
+   * Drop every entry whose envelope can no longer be replayed.
    *
-   * Strictly older, not as-old-as: `open()` still accepts an envelope whose
-   * age is exactly the window, so its nonce has to stay spent for exactly as
-   * long — forgetting it one tick early would reopen a replay.
+   * Strictly expired, not as-expired: `open()` still accepts an envelope
+   * whose age is exactly the window, so its nonce has to stay spent for
+   * exactly as long — forgetting it one tick early would reopen a replay.
    */
   evictExpired(now: number): void {
-    const cutoff = now - this.#windowMs;
     // Insertion order is chronological, so the walk stops at the first
     // surviving entry rather than scanning the whole map.
-    for (const [nonce, seenAt] of this.#seen) {
-      if (seenAt >= cutoff) break;
+    for (const [nonce, expiresAt] of this.#seen) {
+      if (expiresAt >= now) break;
       this.#seen.delete(nonce);
     }
   }

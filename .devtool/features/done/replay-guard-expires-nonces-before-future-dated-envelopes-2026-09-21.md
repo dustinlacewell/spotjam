@@ -1,15 +1,15 @@
 ---
 id: "replay-guard-expires-nonces-before-future-dated-envelopes-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "medium"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:46.171Z"
-completedAt: null
+modified: "2026-09-21T21:53:21.666Z"
+completedAt: "2026-09-21T21:53:21.666Z"
 labels: ["created-by-ai", "protocol", "bug"]
-order: "a21"
+order: "a10V"
 ---
 # Replay guard evicts nonces before future-dated envelopes stop being replayable
 
