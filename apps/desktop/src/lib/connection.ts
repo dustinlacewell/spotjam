@@ -158,7 +158,9 @@ export class Connection {
     // a trace of which one it reached, a stall is indistinguishable from every
     // other stall.
     console.info("spotjam: socket open", this.#url);
-    void this.#send(helloPayload(), generation);
+    void this.#send(helloPayload(), generation).then((sent) => {
+      if (generation === this.#generation && !sent) this.#onHandshakeSendFailure();
+    });
   }
 
   /**
@@ -185,7 +187,9 @@ export class Connection {
 
     if (this.#isExpectedGreetingMiss(event)) {
       this.#handshake = "registering";
-      void this.#send(registerPayload(this.#username), generation);
+      void this.#send(registerPayload(this.#username), generation).then((sent) => {
+        if (generation === this.#generation && !sent) this.#onHandshakeSendFailure();
+      });
       return;
     }
 
@@ -209,6 +213,23 @@ export class Connection {
   #onClose(generation: number): void {
     if (generation !== this.#generation) return;
     this.#socket = null;
+    this.#setStatus({ socket: "disconnected", synced: false });
+    this.#scheduleReconnect();
+  }
+
+  /**
+   * A handshake frame that never went leaves the socket alive but useless:
+   * the server is still waiting for the greeting (or registration) and no
+   * `onclose` is coming to drive a reconnect. Treat the send failure like a
+   * socket failure — close what is still open and let the usual path, or the
+   * reconnect timer, take over.
+   */
+  #onHandshakeSendFailure(): void {
+    const socket = this.#socket;
+    if (socket !== null) {
+      this.#socket = null;
+      socket.close();
+    }
     this.#setStatus({ socket: "disconnected", synced: false });
     this.#scheduleReconnect();
   }

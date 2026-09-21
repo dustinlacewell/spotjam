@@ -1,15 +1,15 @@
 ---
 id: "handshake-send-failure-stalls-connection-forever-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "medium"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:40.932Z"
-completedAt: null
+modified: "2026-09-21T21:52:59.968Z"
+completedAt: "2026-09-21T21:52:59.968Z"
 labels: ["created-by-ai", "sync", "bug"]
-order: "a2G"
+order: "a14"
 ---
 # Handshake send failure with a live socket stalls the connection forever
 

@@ -13,6 +13,7 @@ import {
   Connection,
   isRoomDetailEvent,
   isRoomListEvent,
+  type ConnectionStatus,
   type SocketLike,
 } from "./connection";
 
@@ -211,5 +212,94 @@ describe("Connection queries", () => {
 
     expect(readyCount).toBe(1);
     harness.connection.destroy();
+  });
+});
+
+describe("Handshake send failures", () => {
+  it("closes the socket and schedules a reconnect when the greeting cannot be signed", async () => {
+    const keypair = generateKeypair();
+    const sockets: FakeSocket[] = [];
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    const statuses: ConnectionStatus[] = [];
+    // The Rust signer is unavailable, exactly the failure mode #send reports.
+    const brokenIdentity = new IdentityClient(async () => {
+      throw new Error("signer unavailable");
+    });
+    const connection = new Connection(
+      { publicKey: keypair.publicKey, username: "alice" },
+      {
+        url: "wss://test.invalid",
+        identity: brokenIdentity,
+        socketFactory: () => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+        setTimer: (fn, ms) => {
+          timers.push({ fn, ms });
+          return timers.length as unknown as ReturnType<typeof setTimeout>;
+        },
+        clearTimer: () => {},
+        now: () => 1_700_000_000_000,
+      },
+    );
+    connection.onStatus((status) => statuses.push(status));
+
+    // The socket is open and alive — no `onclose` will fire on its own.
+    sockets[0]?.open();
+    await settle();
+
+    // The failed handshake send must not leave the connection stalled: the
+    // socket is closed and a reconnect has been scheduled.
+    expect(sockets[0]?.closed).toBe(true);
+    expect(timers.length).toBe(1);
+    expect(statuses.at(-1)).toEqual({ socket: "disconnected", synced: false });
+    expect(connection.isReady()).toBe(false);
+    connection.destroy();
+  });
+
+  it("does the same when the registration send fails while the socket is alive", async () => {
+    const keypair = generateKeypair();
+    const sockets: FakeSocket[] = [];
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    // Signing works for the greeting, then fails for the registration.
+    let seals = 0;
+    const identity = new IdentityClient(async (cmd, args) => {
+      if (cmd !== "identity_sign") throw new Error(`unexpected command ${cmd}`);
+      seals += 1;
+      if (seals > 1) throw new Error("signer unavailable");
+      return signBytes(fromHex(args?.messageHex as string), keypair.secretKey);
+    });
+    const connection = new Connection(
+      { publicKey: keypair.publicKey, username: "alice" },
+      {
+        url: "wss://test.invalid",
+        identity,
+        socketFactory: () => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+        setTimer: (fn, ms) => {
+          timers.push({ fn, ms });
+          return timers.length as unknown as ReturnType<typeof setTimeout>;
+        },
+        clearTimer: () => {},
+        now: () => 1_700_000_000_000,
+      },
+    );
+
+    sockets[0]?.open();
+    await settle();
+    expect(sockets[0]?.types()).toEqual(["hello"]);
+
+    // The server asks for a registration; the signing of that frame fails.
+    sockets[0]?.deliver({ type: "error", code: "unknown-identity", message: "register" });
+    await settle();
+
+    expect(sockets[0]?.closed).toBe(true);
+    expect(timers.length).toBe(1);
+    expect(connection.isReady()).toBe(false);
+    connection.destroy();
   });
 });
