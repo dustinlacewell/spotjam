@@ -49,6 +49,26 @@ describe("ReplayGuard", () => {
     expect(guard.size).toBe(1);
   });
 
+  it("evicts later entries that expire before an older future-dated one", () => {
+    // Expiry = max(now, ts) + windowMs, so a future-dated envelope admitted
+    // first can outlive later short-lived entries. evictExpired must scan the
+    // whole map, not stop at the first survivor.
+    const guard = new ReplayGuard({ windowMs: 1_000 });
+    // Admitted first, but future-dated: it expires last (61_000).
+    guard.admit("future", 0, 60_000);
+    // Admitted later, but already-past timestamps: they expire sooner (2_000).
+    guard.admit("b", 1_000, 1_000);
+    guard.admit("c", 1_001, 1_001);
+    expect(guard.size).toBe(3);
+
+    // By 3_000 both short-lived entries are expired while the future-dated
+    // nonce must still hold — the replays of those envelopes stay blocked.
+    guard.evictExpired(3_000);
+    expect(guard.admit("b", 3_000, 1_000)).toBe(true); // spent, forgotten
+    expect(guard.admit("c", 3_000, 1_001)).toBe(true); // spent, forgotten
+    expect(guard.admit("future", 3_000, 60_000)).toBe(false); // still held
+  });
+
   it("never exceeds the entry ceiling", () => {
     const guard = new ReplayGuard({ windowMs: 60_000, maxEntries: 10 });
     for (let i = 0; i < 100; i++) guard.admit(`n${i}`, 1000, 1000);

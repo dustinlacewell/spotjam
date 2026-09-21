@@ -28,7 +28,7 @@ const DEFAULT_MAX_ENTRIES = 100_000;
 export class ReplayGuard {
   readonly #windowMs: number;
   readonly #maxEntries: number;
-  /** nonce -> epoch ms when the entry may be forgotten. Insertion order is chronological. */
+  /** nonce -> epoch ms when the entry may be forgotten. Not ordered by expiry. */
   readonly #seen = new Map<string, number>();
 
   constructor(options: ReplayGuardOptions = {}) {
@@ -72,11 +72,11 @@ export class ReplayGuard {
    * exactly as long — forgetting it one tick early would reopen a replay.
    */
   evictExpired(now: number): void {
-    // Insertion order is chronological, so the walk stops at the first
-    // surviving entry rather than scanning the whole map.
+    // Expiry = max(now, ts) + windowMs, so a future-dated envelope admitted
+    // early can outlive later entries: expiry is not monotonic in insertion
+    // order, so scan the whole map instead of stopping at the first survivor.
     for (const [nonce, expiresAt] of this.#seen) {
-      if (expiresAt >= now) break;
-      this.#seen.delete(nonce);
+      if (expiresAt < now) this.#seen.delete(nonce);
     }
   }
 

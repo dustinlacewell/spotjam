@@ -1,15 +1,15 @@
 ---
 id: "replay-guard-evictexpired-break-assumes-monotonic-expiry-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "low"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T18:20:00.000Z"
-modified: "2026-09-21T18:20:00.000Z"
-completedAt: null
+modified: "2026-09-21T23:35:06.151Z"
+completedAt: "2026-09-21T23:35:06.151Z"
 labels: ["created-by-ai", "code-quality"]
-order: null
+order: "a104"
 ---
 # Replay-guard evictExpired early-break assumes monotonic expiry
 
