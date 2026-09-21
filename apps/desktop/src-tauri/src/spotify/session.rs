@@ -480,9 +480,15 @@ impl BridgeSession {
 
     /// Sits on a ready connection until something ends it.
     ///
-    /// Two things can: the socket dies, or xpui reloads. A reload keeps the
-    /// socket but throws away every stashed service, so we wait for React to
-    /// come back rather than reconnecting.
+    /// Three things can: the socket dies, xpui reloads, or the state watcher
+    /// reports the bridge has been demoted to `Lost` underneath us. The last
+    /// is the easy one to miss: a command's `demote_on` runs on another task
+    /// and never touches the socket or the event stream, and an in-place xpui
+    /// reload keeps the WebSocket open — `executionContextsCleared` has
+    /// already been delivered (that is how the command failed in the first
+    /// place), so no further event and no close ever arrive. Without this
+    /// arm the supervisor would sit here forever reporting `lost` while no
+    /// reconnect ever ran.
     async fn watch_ready(&self) {
         let Some(client) = self.client.read().await.clone() else {
             self.set_state(BridgeState::Lost);
@@ -490,9 +496,19 @@ impl BridgeSession {
         };
 
         let mut events = client.events();
+        let mut states = self.subscribe();
 
         loop {
             tokio::select! {
+                // A command demoted the bridge to `Lost` out from under this
+                // watch — most plausibly a stale-page failure, which means
+                // this client belongs to a context we no longer reach. The
+                // socket stays open, so neither of the other arms can fire;
+                // without this arm the supervisor never reconnects.
+                _ = state_turns_lost(&mut states) => {
+                    self.set_state(BridgeState::Lost);
+                    return;
+                }
                 _ = client.closed() => {
                     self.set_state(BridgeState::Lost);
                     return;
@@ -542,6 +558,26 @@ impl BridgeSession {
 impl Default for BridgeSession {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Waits until the observed bridge state becomes `Lost`.
+///
+/// The supervisor's `watch_ready` parks on this: a command demoting the
+/// bridge on another task never closes the socket and never produces a CDP
+/// event, so the state watch is the only channel that carries the news. A
+/// change that is not `Lost` (e.g. `Booting` while a remount runs) just
+/// clears the watch's update flag and keeps waiting. A closed channel —
+/// impossible while the session lives — also releases, so the caller can
+/// never hang on a dead watch.
+async fn state_turns_lost(states: &mut watch::Receiver<BridgeState>) {
+    loop {
+        if *states.borrow_and_update() == BridgeState::Lost {
+            return;
+        }
+        if states.changed().await.is_err() {
+            return;
+        }
     }
 }
 
@@ -930,6 +966,78 @@ mod tests {
         session.set_state(BridgeState::Ready);
         session.demote_on(false, "Invalid playlist or members response!");
         assert_eq!(session.state(), BridgeState::Ready);
+    }
+
+    /// ADVERSARY. The wedge this pins is subtler than the state change above:
+    /// `demote_on` runs on a command task while the supervisor is parked in
+    /// `watch_ready`'s select, which used to wake only on `client.closed()`
+    /// or a CDP event. An in-place xpui reload keeps the WebSocket open and
+    /// has already delivered `executionContextsCleared` — that is how the
+    /// command failed via the classifier in the first place — so no further
+    /// event and no close ever arrive. The bridge then reports `lost` with
+    /// every command failing and `connect_attempt` never running again: a
+    /// permanent outage until the app restarts.
+    ///
+    /// The fix is the `state_turns_lost` arm. The demotion carries its news
+    /// only on the state watch, so the watch has to be one of the things
+    /// `watch_ready` waits on. This exercises the primitive end-to-end over
+    /// the session's own watch: `demote_on` from outside must release it.
+    #[tokio::test(start_paused = true)]
+    async fn a_demotion_releases_the_ready_watch() {
+        let session = BridgeSession::new();
+        session.set_state(BridgeState::Ready);
+        let mut states = session.subscribe();
+
+        let watched = tokio::spawn(async move {
+            state_turns_lost(&mut states).await;
+        });
+
+        // The exact call a failing command makes: socket still open, message
+        // stamped as stale. Only the state watch learns about it.
+        session.demote_on(
+            false,
+            &format!(
+                "JS exception: Error: {} no React fiber found",
+                registry::STALE_PREFIX
+            ),
+        );
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), watched).await.is_ok(),
+            "a demotion to Lost must wake the supervisor's ready watch, or the \
+             bridge wedges until the app restarts"
+        );
+    }
+
+    /// The watch arm must not fire spuriously: a remount sets `Booting` from
+    /// inside `watch_ready`'s own event arm, which wakes this same watch. A
+    /// change to anything but `Lost` must keep the supervisor parked, or
+    /// every reload would tear down a remount mid-recovery.
+    #[tokio::test(start_paused = true)]
+    async fn a_change_to_something_other_than_lost_keeps_the_ready_watch_parked() {
+        let session = BridgeSession::new();
+        session.set_state(BridgeState::Ready);
+        let mut states = session.subscribe();
+
+        let watched = tokio::spawn(async move {
+            state_turns_lost(&mut states).await;
+        });
+
+        // A remount's intermediate state. Not a reason to reconnect.
+        session.set_state(BridgeState::Booting);
+        tokio::time::advance(Duration::from_secs(1)).await;
+
+        assert!(
+            !watched.is_finished(),
+            "a non-Lost state change must not end the ready watch"
+        );
+
+        // And the Lost change it was installed for still works after.
+        session.set_state(BridgeState::Lost);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), watched).await.is_ok(),
+            "the watch must still fire on the state it exists for"
+        );
     }
 
     /// ADVERSARY. The classifier reads a message that is not always the page's
