@@ -72,3 +72,9 @@ The site deploys via GitHub Actions on push.
 
 `docs/` mirrors the architecture, one topic per file. Start at
 [docs/desktop/spotify-bridge/](docs/desktop/spotify-bridge/).
+
+## Nix
+
+`shell.nix` at the repo root pins the toolchain (it is the canonical
+dependency list); with nix + direnv you get it automatically, otherwise
+replicate the listed deps.

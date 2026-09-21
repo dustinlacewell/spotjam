@@ -33,3 +33,7 @@ apps/server/data/
 *.njsproj
 *.sln
 *.sw?
+
+# direnv store artifacts
+.direnv/
+.envrc
