@@ -485,7 +485,7 @@ describe("RoomClient ops", () => {
     room.destroy();
   });
 
-  it("blends a later sample rather than swapping to it", async () => {
+  it("adopts a later larger sample rather than blending the latency bias in", async () => {
     const { room, latest, setLocalNow } = await connected();
 
     setLocalNow(EPOCH);
@@ -493,7 +493,8 @@ describe("RoomClient ops", () => {
     await settle();
     expect(room.serverNow()).toBe(EPOCH);
 
-    // One late frame must not yank the bar: the offset moves a step at a time.
+    // Each sample is biased low by its network hop, so the estimate is the
+    // largest sample in the window — not an average that pins the bias in.
     latest().deliver({
       type: "room-state",
       snapshot: snapshot({ serverTime: EPOCH + 10_000 }),
@@ -501,8 +502,7 @@ describe("RoomClient ops", () => {
     await settle();
 
     const drift = room.serverNow() - EPOCH;
-    expect(drift).toBeGreaterThan(0);
-    expect(drift).toBeLessThan(10_000);
+    expect(drift).toBe(10_000);
     room.destroy();
   });
 });

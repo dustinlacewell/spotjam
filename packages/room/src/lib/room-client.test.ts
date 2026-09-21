@@ -159,8 +159,9 @@ describe("reduce", () => {
     expect(serverNowOf(view, EPOCH)).toBe(EPOCH + 5_000);
   });
 
-  it("blends a later server time rather than swapping to it", () => {
-    // One late frame must not yank the bar; the offset moves a step at a time.
+  it("adopts a later larger sample rather than blending the latency bias in", () => {
+    // Each sample is biased low by its network hop, so the estimate is the
+    // largest sample in the window — not an average that pins the bias in.
     const first = reduce(
       INITIAL_VIEW,
       { type: "room-state", snapshot: snapshot({ serverTime: EPOCH }) },
@@ -173,8 +174,22 @@ describe("reduce", () => {
     );
 
     expect(first.clockOffsetMs).toBe(0);
-    expect(second.clockOffsetMs).toBeGreaterThan(0);
-    expect(second.clockOffsetMs).toBeLessThan(1_000);
+    expect(second.clockOffsetMs).toBe(1_000);
+  });
+
+  it("keeps the window's max, so one late frame cannot lower the estimate", () => {
+    const first = reduce(
+      INITIAL_VIEW,
+      { type: "room-state", snapshot: snapshot({ serverTime: EPOCH + 1_000 }) },
+      EPOCH,
+    );
+    const second = reduce(
+      first,
+      { type: "room-state", snapshot: snapshot({ serverTime: EPOCH }) },
+      EPOCH,
+    );
+
+    expect(second.clockOffsetMs).toBe(1_000);
   });
 
   it("reads local time as server time before any snapshot has landed", () => {

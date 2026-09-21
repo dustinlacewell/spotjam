@@ -1,15 +1,15 @@
 ---
 id: "clock-offset-samples-arrival-time-and-runs-behind-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "medium"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:52.756Z"
-completedAt: null
+modified: "2026-09-21T22:14:41.560Z"
+completedAt: "2026-09-21T22:14:41.560Z"
 labels: ["created-by-ai", "sync", "bug"]
-order: "a204"
+order: "a11"
 ---
 # Clock offset is measured at frame arrival, so every client runs systematically behind
 

@@ -53,7 +53,8 @@ export type {
 
 // The clock offset — reading a server-dated pointer with a local clock.
 
-export { OFFSET_ALPHA, foldOffset, serverNow } from "./lib/clock-offset";
+export { OFFSET_WINDOW_MS, foldSample, offsetOf, serverNow } from "./lib/clock-offset";
+export type { OffsetSample } from "./lib/clock-offset";
 
 // Minting queue items, which means resolving each track's length first.
 

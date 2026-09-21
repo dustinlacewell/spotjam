@@ -22,7 +22,8 @@ import {
   type SharedPlaylist,
 } from "@spotjam/protocol";
 
-import { foldOffset, serverNow } from "./clock-offset";
+import { foldSample, offsetOf, serverNow } from "./clock-offset";
+import type { OffsetSample } from "./clock-offset";
 import type { ParsedTrack } from "./spotify-link";
 
 /** How the socket is doing, for the status line. */
@@ -60,6 +61,15 @@ export interface RoomView {
    * what makes a local `Date.now()` usable for reading one.
    */
   clockOffsetMs: number | null;
+  /**
+   * The recent `serverTime` samples the offset was estimated from.
+   *
+   * Each sample is biased low by the frame's network hop (the server stamps
+   * `serverTime` when it sends), so the offset is the *largest* sample in the
+   * window rather than a blend. The window is kept so a future sample can
+   * revise the estimate; only its max is exposed as `clockOffsetMs`.
+   */
+  offsetSamples: OffsetSample[];
 }
 
 /** A server error, narrowed to what the UI needs to say about it. */
@@ -78,6 +88,7 @@ export const INITIAL_VIEW: RoomView = {
   lastError: null,
   peerPlaylists: {},
   clockOffsetMs: null,
+  offsetSamples: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -207,12 +218,21 @@ export function parseServerEvent(raw: string): ServerEvent | null {
  */
 export function reduce(view: RoomView, event: ServerEvent, localNow: number): RoomView {
   switch (event.type) {
-    case "room-state":
+    case "room-state": {
+      // The offset estimate is the largest sample in the window: samples are
+      // biased low by their network hop, so the least-delayed one is the
+      // least biased. See clock-offset.ts.
+      const offsetSamples = foldSample(
+        view.offsetSamples,
+        event.snapshot.serverTime,
+        localNow,
+      );
       return {
         ...view,
         snapshot: event.snapshot,
         status: { ...view.status, synced: true },
-        clockOffsetMs: foldOffset(view.clockOffsetMs, event.snapshot.serverTime, localNow),
+        clockOffsetMs: offsetOf(offsetSamples),
+        offsetSamples,
         // A good snapshot means the room is working; a stale error would
         // otherwise sit in the UI forever.
         lastError: null,
@@ -221,6 +241,7 @@ export function reduce(view: RoomView, event: ServerEvent, localNow: number): Ro
         // starts the room's own copy empty again.
         peerPlaylists: retainMembers(view.peerPlaylists, event.snapshot.participants),
       };
+    }
 
     case "registered":
       // Nothing to store: the snapshot carries the username the server chose,
