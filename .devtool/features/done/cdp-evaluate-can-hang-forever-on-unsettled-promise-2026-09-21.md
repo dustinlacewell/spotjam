@@ -1,15 +1,15 @@
 ---
 id: "cdp-evaluate-can-hang-forever-on-unsettled-promise-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "medium"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:35.371Z"
-completedAt: null
+modified: "2026-09-21T07:50:55.916Z"
+completedAt: "2026-09-21T07:50:55.917Z"
 labels: ["created-by-ai", "bridge", "bug"]
-order: "a2"
+order: "a1V"
 ---
 # CDP evaluate can hang forever on a promise that never settles
 

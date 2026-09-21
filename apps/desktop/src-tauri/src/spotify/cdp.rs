@@ -26,6 +26,12 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 /// reload burst means it rarely has to.
 const EVENT_BUFFER: usize = 512;
 
+/// Bound on a whole `Runtime.evaluate` round trip, including the time the
+/// page may take to settle an awaited promise. CDP itself never bounds that
+/// await, so without this a never-settling promise would hang the caller
+/// forever (see the devtool finding on the evaluate hang).
+const EVALUATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Waiters for in-flight requests, plus whether the reader has shut down.
 ///
 /// The flag lives inside the map's lock on purpose. The reader clears the
@@ -162,13 +168,17 @@ impl CdpClient {
                 "expression": expression,
                 "awaitPromise": true,
                 "returnByValue": true,
-                "timeout": 15000,
             }
         }))
         .await?;
 
-        let response = rx
+        // CDP does not bound how long an awaited page-side promise may take
+        // to settle (the protocol's `timeout` param governs side-effect
+        // execution, not the await), so a never-settling promise would leave
+        // this future pending forever. Bound the whole round trip here.
+        let response = tokio::time::timeout(EVALUATE_TIMEOUT, rx)
             .await
+            .map_err(|_| anyhow!("CDP evaluate timed out after {}s", EVALUATE_TIMEOUT.as_secs()))?
             .map_err(|_| anyhow!("CDP connection closed before response"))?;
 
         if let Some(error) = response.get("error") {
