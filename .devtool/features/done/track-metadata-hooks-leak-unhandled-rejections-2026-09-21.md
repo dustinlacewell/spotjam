@@ -1,15 +1,15 @@
 ---
 id: "track-metadata-hooks-leak-unhandled-rejections-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "medium"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:49.753Z"
-completedAt: null
+modified: "2026-09-21T21:53:07.269Z"
+completedAt: "2026-09-21T21:53:07.269Z"
 labels: ["created-by-ai", "bug"]
-order: "a208"
+order: "a12"
 ---
 # Track-metadata hooks leak unhandled promise rejections when the Spotify client is closed
 
