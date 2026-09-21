@@ -1,15 +1,15 @@
 ---
 id: "spotify-seek-rejects-fractional-positionms-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "medium"
 assignee: null
 epic: "playback-driver"
 dueDate: null
 created: "2026-09-21T22:09:31.000Z"
-modified: "2026-09-21T22:09:31.000Z"
-completedAt: null
+modified: "2026-09-21T23:02:18.287Z"
+completedAt: "2026-09-21T23:02:18.287Z"
 labels: ["created-by-ai", "bug"]
-order: null
+order: "a108"
 ---
 # spotify_seek rejects fractional positionMs
 

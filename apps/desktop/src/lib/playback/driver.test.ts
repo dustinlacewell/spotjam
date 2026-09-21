@@ -304,6 +304,25 @@ describe("PlaybackDriver", () => {
     driver.stop();
   });
 
+  it("sends the bridge integer seek positions even with a fractional server clock", async () => {
+    // The room clock interpolates offsets and can hand the driver a fractional
+    // serverNow, making the seek position a float. The Tauri bridge declares
+    // u64 and rejects the command outright — so the bridge call must round.
+    const { spotify, room, driver } = setup();
+    // The live failure arrived from a serverNow with a sub-millisecond tail.
+    (room as unknown as { clock: () => number }).clock = () => Date.now() + 0.044189453125;
+    room.pointer = pointerOn(A, Date.now() - 60_000);
+    driver.start();
+    await run(1500);
+
+    const seeks = spotify.calls.filter((c) => c.cmd === "spotify_seek");
+    expect(seeks.length).toBeGreaterThan(0);
+    for (const call of seeks) {
+      expect(Number.isInteger(call.args?.positionMs as number)).toBe(true);
+    }
+    driver.stop();
+  });
+
   it("pauses before seeking when joining a paused room mid-track", async () => {
     const { spotify, room, driver } = setup();
     room.pointer = pointerOn(A, Date.now(), {

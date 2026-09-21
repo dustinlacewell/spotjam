@@ -402,7 +402,9 @@ function tauriCall(command: Command): [string, Record<string, unknown> | undefin
     case "play":
       return ["spotify_play_track", { uri: command.uri }];
     case "seek":
-      return ["spotify_seek", { positionMs: command.positionMs }];
+      // positionMs arrives interpolated from the room clock and can be
+      // fractional; the Tauri bridge declares u64 and rejects a float.
+      return ["spotify_seek", { positionMs: Math.round(command.positionMs) }];
     case "pause":
       return ["spotify_pause", undefined];
     case "resume":
