@@ -1,15 +1,15 @@
 ---
 id: "promote-wire-test-script-into-repo-as-reusable-server-test-client-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "low"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T18:30:00.000Z"
-modified: "2026-09-21T18:30:00.000Z"
-completedAt: null
+modified: "2026-09-21T22:41:32.121Z"
+completedAt: "2026-09-21T22:41:32.121Z"
 labels: ["created-by-ai", "devex"]
-order: null
+order: "a10G"
 ---
 # Promote the wire-test script into the repo as a reusable signaling-server test client
 

@@ -137,23 +137,42 @@ What an agent can do instead:
 
 ## Simulating a second peer from a script
 
-The protocol is small enough to speak from ~60 lines of Node
-(`node:crypto` for ed25519, global `WebSocket`). The pieces, all matching
-`packages/protocol`:
+Don't re-derive the protocol inline — use the committed script client in
+`apps/server/scripts/`:
 
-1. ed25519 keypair; pubkey hex (32 bytes) is the identity.
-2. Canonical JSON for signing: keys sorted at every depth, no whitespace —
-   mirror `canonicalize` from `packages/protocol/src/canonical.ts`.
-3. Every frame is an envelope `{ nonce, payload, pubkey, timestamp,
-   signature }` where `signature` = ed25519 over the canonical bytes of
-   `{ nonce, payload, pubkey, timestamp }`.
-4. Handshake: send `{ type: "hello" }`; expect `error unknown-identity`
-   the first time; answer `{ type: "register", username }`; get
-   `registered`.
-5. Ops: `join-room`, `set-broadcasting`, `enqueue` (`items: [{ id, uri,
-   trackId, durationMs }]`), `set-paused`, `seek`, `skip`, … Server events:
-   `room-state` carries the full snapshot (participants, sessionQueue,
-   myQueue, pointer).
+- `apps/server/scripts/wire-client.mjs` — the thin reusable client. It
+  imports envelope sealing, canonicalization and identity straight from
+  `@spotjam/protocol` (so it cannot drift from the wire contract) and
+  exports `makeIdentity`, `makeEnvelope`, `createWireClient` (connect,
+  `send`, `sendRaw` for pre-built/replayed frames, `waitFor(pred, label)`,
+  `handshake({ roomId })`, `close`), plus `createChecks`, a small
+  pass/fail step harness.
+- `apps/server/scripts/replay-wire-test.mjs` — a worked scenario using the
+  client: the replay-guard live test (future-dated envelope accepted,
+  byte-identical replay inside the nonce-hold window rejected, replay
+  after the window rejected). Read it as a template for driving the room
+  from a script.
+- `apps/server/scripts/wss-check.mjs` — deployed-server smoke check that
+  walks register → join → broadcast → play → position round-trip.
+
+Run any of them from `apps/server` (`WS_URL` overrides the target;
+`ws://127.0.0.1:4444` for the local dev server, `wss://yjs.ldlework.com`
+for the deployment):
+
+    node --experimental-strip-types --import ./src/register-hook.ts \
+      scripts/replay-wire-test.mjs
+
+The resolve hook is needed because `@spotjam/protocol` exports TS sources.
+
+For reference, the protocol shape the scripts wrap (all matching
+`packages/protocol`): every frame is an envelope `{ nonce, payload, pubkey,
+timestamp, signature }` with `signature` = ed25519 over the canonical
+bytes of `{ nonce, payload, pubkey, timestamp }`; pubkey hex is the
+identity; handshake is `hello` → (`error unknown-identity` →
+`register`) → `registered`; ops include `join-room`, `set-broadcasting`,
+`enqueue` (`items: [{ id, uri, trackId, durationMs }]`), `set-paused`,
+`seek`, `skip`; server events include `room-state`, which carries the full
+snapshot (participants, sessionQueue, myQueue, pointer).
 
 Verified transcript against the local server (`ws://127.0.0.1:4444`):
 open → `unknown-identity` → `registered` → `room-state` snapshots showing
