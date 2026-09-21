@@ -102,13 +102,24 @@ describe("linksFromDrop", () => {
       { [INTERNAL_DRAG_MIME]: "item-7", "text/plain": PLAYLIST_LINK },
       [INTERNAL_DRAG_MIME, "text/plain"],
     );
-    expect(linksFromDrop(data)).toEqual({ tracks: [], playlists: [] });
+    expect(linksFromDrop(data)).toEqual({ tracks: [], playlists: [], albums: [], artists: [] });
   });
 
-  it("returns two empty lists when the payload carries neither kind", () => {
+  it("returns four empty lists when the payload carries neither kind", () => {
     expect(linksFromDrop(drop({ "text/plain": "just some words" }))).toEqual({
       tracks: [],
       playlists: [],
+      albums: [],
+      artists: [],
     });
+  });
+
+  it("splits album and artist links out of a drop", () => {
+    const data = drop({
+      "text/plain": `https://open.spotify.com/album/eeee5555\nhttps://open.spotify.com/artist/ffff6666`,
+    });
+    const links = linksFromDrop(data);
+    expect(links.albums.map((a) => a.albumId)).toEqual(["eeee5555"]);
+    expect(links.artists.map((a) => a.artistId)).toEqual(["ffff6666"]);
   });
 });

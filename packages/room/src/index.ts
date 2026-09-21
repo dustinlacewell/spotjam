@@ -70,10 +70,18 @@ export type { TrackProgressView } from "./lib/track-progress";
 export {
   parseSpotifyLinks,
   parseSpotifyPlaylistLink,
+  parseSpotifyAlbumLink,
+  parseSpotifyArtistLink,
   parseSpotifyTrackLink,
   parseSpotifyTrackLinks,
 } from "./lib/spotify-link";
-export type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "./lib/spotify-link";
+export type {
+  ParsedAlbum,
+  ParsedArtist,
+  ParsedLinks,
+  ParsedPlaylist,
+  ParsedTrack,
+} from "./lib/spotify-link";
 
 // Playlists.
 

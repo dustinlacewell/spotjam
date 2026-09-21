@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseSpotifyAlbumLink,
+  parseSpotifyArtistLink,
   parseSpotifyLinks,
   parseSpotifyPlaylistLink,
   parseSpotifyTrackLinks,
@@ -8,6 +10,8 @@ import {
 const LINK_A = "https://open.spotify.com/track/aaaa1111";
 const LINK_B = "https://open.spotify.com/track/bbbb2222";
 const PLAYLIST_URL = "https://open.spotify.com/playlist/pppp1111";
+const ALBUM_URL = "https://open.spotify.com/album/eeee5555";
+const ARTIST_URL = "https://open.spotify.com/artist/ffff6666";
 
 describe("parseSpotifyTrackLinks", () => {
   it("returns nothing for empty or junk-only text", () => {
@@ -95,6 +99,78 @@ describe("parseSpotifyPlaylistLink", () => {
   });
 });
 
+describe("parseSpotifyAlbumLink", () => {
+  it("parses a share URL", () => {
+    expect(parseSpotifyAlbumLink(ALBUM_URL)).toEqual({
+      uri: "spotify:album:eeee5555",
+      albumId: "eeee5555",
+    });
+  });
+
+  it("parses a raw album URI", () => {
+    expect(parseSpotifyAlbumLink("spotify:album:gggg7777")).toEqual({
+      uri: "spotify:album:gggg7777",
+      albumId: "gggg7777",
+    });
+  });
+
+  it("accepts an intl path prefix and query strings", () => {
+    expect(parseSpotifyAlbumLink("https://open.spotify.com/intl-de/album/hhhh8888?si=x")).toEqual({
+      uri: "spotify:album:hhhh8888",
+      albumId: "hhhh8888",
+    });
+  });
+
+  it("returns null for tracks, artists, playlists, junk and empty text", () => {
+    expect(parseSpotifyAlbumLink(LINK_A)).toBeNull();
+    expect(parseSpotifyAlbumLink(ARTIST_URL)).toBeNull();
+    expect(parseSpotifyAlbumLink(PLAYLIST_URL)).toBeNull();
+    expect(parseSpotifyAlbumLink("spotify:track:aaaa1111")).toBeNull();
+    expect(parseSpotifyAlbumLink("https://example.com/album/xxxx")).toBeNull();
+    expect(parseSpotifyAlbumLink("")).toBeNull();
+  });
+
+  it("rejects an album URI with trailing junk", () => {
+    expect(parseSpotifyAlbumLink("spotify:album:eeee5555:extra")).toBeNull();
+  });
+});
+
+describe("parseSpotifyArtistLink", () => {
+  it("parses a share URL", () => {
+    expect(parseSpotifyArtistLink(ARTIST_URL)).toEqual({
+      uri: "spotify:artist:ffff6666",
+      artistId: "ffff6666",
+    });
+  });
+
+  it("parses a raw artist URI", () => {
+    expect(parseSpotifyArtistLink("spotify:artist:iiii9999")).toEqual({
+      uri: "spotify:artist:iiii9999",
+      artistId: "iiii9999",
+    });
+  });
+
+  it("accepts an intl path prefix and query strings", () => {
+    expect(parseSpotifyArtistLink("https://open.spotify.com/intl-fr/artist/jjjj0000?si=x")).toEqual({
+      uri: "spotify:artist:jjjj0000",
+      artistId: "jjjj0000",
+    });
+  });
+
+  it("returns null for tracks, albums, playlists, junk and empty text", () => {
+    expect(parseSpotifyArtistLink(LINK_A)).toBeNull();
+    expect(parseSpotifyArtistLink(ALBUM_URL)).toBeNull();
+    expect(parseSpotifyArtistLink(PLAYLIST_URL)).toBeNull();
+    expect(parseSpotifyArtistLink("spotify:track:aaaa1111")).toBeNull();
+    expect(parseSpotifyArtistLink("https://example.com/artist/xxxx")).toBeNull();
+    expect(parseSpotifyArtistLink("")).toBeNull();
+  });
+
+  it("rejects an artist URI with trailing junk", () => {
+    expect(parseSpotifyArtistLink("spotify:artist:ffff6666:extra")).toBeNull();
+  });
+});
+
 describe("parseSpotifyLinks", () => {
   it("splits a mixed paste into tracks and playlists", () => {
     const text = `${LINK_A}\n${PLAYLIST_URL}\nspotify:playlist:qqqq2222 ${LINK_B}`;
@@ -103,12 +179,38 @@ describe("parseSpotifyLinks", () => {
     expect(links.playlists.map((p) => p.playlistId)).toEqual(["pppp1111", "qqqq2222"]);
   });
 
+  it("splits albums and artists out of a mixed paste", () => {
+    const text = `${ALBUM_URL}\n${ARTIST_URL} spotify:album:kkkk1111`;
+    const links = parseSpotifyLinks(text);
+    expect(links.albums.map((a) => a.albumId)).toEqual(["eeee5555", "kkkk1111"]);
+    expect(links.artists.map((a) => a.artistId)).toEqual(["ffff6666"]);
+  });
+
   it("dedupes playlists by id across url and uri forms", () => {
     const text = `${PLAYLIST_URL}?si=one spotify:playlist:pppp1111 ${PLAYLIST_URL}`;
     expect(parseSpotifyLinks(text).playlists.map((p) => p.playlistId)).toEqual(["pppp1111"]);
   });
 
-  it("returns two empty lists for junk", () => {
-    expect(parseSpotifyLinks("nothing to see here")).toEqual({ tracks: [], playlists: [] });
+  it("dedupes albums and artists by id across url and uri forms", () => {
+    const text = `${ALBUM_URL}?si=one spotify:album:eeee5555 ${ARTIST_URL} spotify:artist:ffff6666`;
+    const links = parseSpotifyLinks(text);
+    expect(links.albums.map((a) => a.albumId)).toEqual(["eeee5555"]);
+    expect(links.artists.map((a) => a.artistId)).toEqual(["ffff6666"]);
+  });
+
+  it("dedupes each kind independently — the same id string can name both a track and an album", () => {
+    const text = "https://open.spotify.com/track/sameid1 https://open.spotify.com/album/sameid1";
+    const links = parseSpotifyLinks(text);
+    expect(links.tracks.map((t) => t.trackId)).toEqual(["sameid1"]);
+    expect(links.albums.map((a) => a.albumId)).toEqual(["sameid1"]);
+  });
+
+  it("returns four empty lists for junk", () => {
+    expect(parseSpotifyLinks("nothing to see here")).toEqual({
+      tracks: [],
+      playlists: [],
+      albums: [],
+      artists: [],
+    });
   });
 });

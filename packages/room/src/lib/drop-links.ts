@@ -35,7 +35,9 @@ export function tracksFromDrop(data: DropData): ParsedTrack[] {
  * a drop can carry a mix of tracks and playlists.
  */
 export function linksFromDrop(data: DropData): ParsedLinks {
-  if (data.types?.includes(INTERNAL_DRAG_MIME)) return { tracks: [], playlists: [] };
+  if (data.types?.includes(INTERNAL_DRAG_MIME)) {
+    return { tracks: [], playlists: [], albums: [], artists: [] };
+  }
 
   const uriList = readType(data, "text/uri-list");
   const plain = readType(data, "text/plain");

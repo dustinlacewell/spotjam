@@ -1,6 +1,6 @@
 ---
 id: "drag-any-static-list-spotify-link-albums-artists-2026-09-21"
-status: "backlog"
+status: "in-progress"
 priority: "low"
 assignee: null
 epic: null

@@ -8,10 +8,22 @@ export interface ParsedPlaylist {
   playlistId: string;
 }
 
-/** A block of pasted or dropped text, split into the two link kinds we accept. */
+export interface ParsedAlbum {
+  uri: string;
+  albumId: string;
+}
+
+export interface ParsedArtist {
+  uri: string;
+  artistId: string;
+}
+
+/** A block of pasted or dropped text, split into the link kinds we accept. */
 export interface ParsedLinks {
   tracks: ParsedTrack[];
   playlists: ParsedPlaylist[];
+  albums: ParsedAlbum[];
+  artists: ParsedArtist[];
 }
 
 const SHARE_URL_PATTERN =
@@ -21,6 +33,14 @@ const URI_PATTERN = /^spotify:track:([a-zA-Z0-9]+)$/;
 const PLAYLIST_URL_PATTERN =
   /open\.spotify\.com\/(?:intl-[a-z]{2}\/)?playlist\/([a-zA-Z0-9]+)/;
 const PLAYLIST_URI_PATTERN = /^spotify:playlist:([a-zA-Z0-9]+)$/;
+
+const ALBUM_URL_PATTERN =
+  /open\.spotify\.com\/(?:intl-[a-z]{2}\/)?album\/([a-zA-Z0-9]+)/;
+const ALBUM_URI_PATTERN = /^spotify:album:([a-zA-Z0-9]+)$/;
+
+const ARTIST_URL_PATTERN =
+  /open\.spotify\.com\/(?:intl-[a-z]{2}\/)?artist\/([a-zA-Z0-9]+)/;
+const ARTIST_URI_PATTERN = /^spotify:artist:([a-zA-Z0-9]+)$/;
 
 /**
  * Parses a pasted Spotify share link (https://open.spotify.com/track/...)
@@ -76,34 +96,97 @@ export function parseSpotifyPlaylistLink(input: string): ParsedPlaylist | null {
 }
 
 /**
+ * Parses a Spotify album share link (https://open.spotify.com/album/...)
+ * or a raw spotify:album:... URI. Returns null for anything else, including
+ * track, artist and playlist links.
+ */
+export function parseSpotifyAlbumLink(input: string): ParsedAlbum | null {
+  const trimmed = input.trim();
+
+  const uriMatch = trimmed.match(ALBUM_URI_PATTERN);
+  if (uriMatch) {
+    return { uri: trimmed, albumId: uriMatch[1] };
+  }
+
+  const urlMatch = trimmed.match(ALBUM_URL_PATTERN);
+  if (urlMatch) {
+    const albumId = urlMatch[1];
+    return { uri: `spotify:album:${albumId}`, albumId };
+  }
+
+  return null;
+}
+
+/**
+ * Parses a Spotify artist share link (https://open.spotify.com/artist/...)
+ * or a raw spotify:artist:... URI. Returns null for anything else, including
+ * track, album and playlist links.
+ */
+export function parseSpotifyArtistLink(input: string): ParsedArtist | null {
+  const trimmed = input.trim();
+
+  const uriMatch = trimmed.match(ARTIST_URI_PATTERN);
+  if (uriMatch) {
+    return { uri: trimmed, artistId: uriMatch[1] };
+  }
+
+  const urlMatch = trimmed.match(ARTIST_URL_PATTERN);
+  if (urlMatch) {
+    const artistId = urlMatch[1];
+    return { uri: `spotify:artist:${artistId}`, artistId };
+  }
+
+  return null;
+}
+
+/**
  * Splits a block of text — a multi-line paste or a drag payload — into the
- * tracks and the playlists it mentions. Unrecognisable words are dropped and
- * each id appears once, in the order it was first seen.
+ * tracks, playlists, albums and artists it mentions. Unrecognisable words are
+ * dropped and each id appears once, in the order it was first seen.
  */
 export function parseSpotifyLinks(text: string): ParsedLinks {
-  const seenTracks = new Set<string>();
-  const seenPlaylists = new Set<string>();
+  // Track, playlist, album and artist ids are independently namespaced — the
+  // same base62 string can be both a track id and an album id — so the
+  // dedupe key carries the kind.
+  const seen = new Set<string>();
   const tracks: ParsedTrack[] = [];
   const playlists: ParsedPlaylist[] = [];
+  const albums: ParsedAlbum[] = [];
+  const artists: ParsedArtist[] = [];
+
+  const firstOf = <T extends object>(kind: string, id: string, parsed: T | null): T | null => {
+    const key = `${kind}:${id}`;
+    if (!parsed || seen.has(key)) return null;
+    seen.add(key);
+    return parsed;
+  };
 
   for (const word of text.split(/\s+/)) {
     if (!word) continue;
 
     const track = parseSpotifyTrackLink(word);
-    if (track) {
-      if (!seenTracks.has(track.trackId)) {
-        seenTracks.add(track.trackId);
-        tracks.push(track);
-      }
+    if (track && firstOf("track", track.trackId, track)) {
+      tracks.push(track);
       continue;
     }
 
     const playlist = parseSpotifyPlaylistLink(word);
-    if (playlist && !seenPlaylists.has(playlist.playlistId)) {
-      seenPlaylists.add(playlist.playlistId);
+    if (playlist && firstOf("playlist", playlist.playlistId, playlist)) {
       playlists.push(playlist);
+      continue;
+    }
+
+    const album = parseSpotifyAlbumLink(word);
+    if (album && firstOf("album", album.albumId, album)) {
+      albums.push(album);
+      continue;
+    }
+
+    const artist = parseSpotifyArtistLink(word);
+    if (artist && firstOf("artist", artist.artistId, artist)) {
+      artists.push(artist);
     }
   }
 
-  return { tracks, playlists };
+  return { tracks, playlists, albums, artists };
 }
