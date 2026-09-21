@@ -141,6 +141,41 @@ describe("makeBridgeStateSource", () => {
     expect(tauri.calls).toHaveBeenCalledWith("spotify_bridge_state");
   });
 
+  it("drops the initial read when a state change lands while it is in flight", async () => {
+    // A bespoke pair: the read stays pending until the test resolves it, so an
+    // event can land inside the read's window.
+    let handler: ((event: { payload: { state: BridgeState } }) => void) | null = null;
+    let readResolve: (state: BridgeState) => void = () => {};
+    const tauri = {
+      listen: (
+        _event: string,
+        given: (event: { payload: { state: BridgeState } }) => void,
+      ): Promise<() => void> => {
+        handler = given;
+        return Promise.resolve(vi.fn());
+      },
+      invoke: <T,>(cmd: string): Promise<T> =>
+        cmd === "spotify_bridge_state"
+          ? (new Promise<BridgeState>((resolve) => {
+              readResolve = resolve;
+            }) as unknown as Promise<T>)
+          : Promise.resolve("ready" as T),
+    };
+    const source = makeBridgeStateSource(tauri as never);
+    const seen: BridgeState[] = [];
+
+    source.subscribe((state) => seen.push(state));
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    // The listener is registered; the initial read is still in flight.
+
+    handler?.({ payload: { state: "lost" } });
+    readResolve("booting"); // the older answer arrives last
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+
+    // The newer event stands; the stale read must not overwrite it.
+    expect(seen).toEqual(["lost"]);
+  });
+
   it("connect asks Rust to attempt a connection and answers with the result", async () => {
     const tauri = makeTauri("no-spotify");
     const source = makeBridgeStateSource(tauri);

@@ -1,15 +1,15 @@
 ---
 id: "bridge-state-initial-read-can-overwrite-newer-event-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "low"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:43.381Z"
-completedAt: null
+modified: "2026-09-21T21:52:47.866Z"
+completedAt: "2026-09-21T21:52:47.923Z"
 labels: ["created-by-ai", "sync", "bug"]
-order: "a24"
+order: "a18"
 ---
 # bridge-state initial read can overwrite a newer state event
 

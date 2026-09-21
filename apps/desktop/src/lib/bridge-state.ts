@@ -54,12 +54,18 @@ export function makeBridgeStateSource({ listen, invoke }: BridgeStateDeps): Brid
     subscribe(listener) {
       let live = true;
       let unlisten: (() => void) | null = null;
+      // Set when an event lands before the initial read resolves. The read was
+      // dispatched before the event, so its answer is older: applying it now
+      // would overwrite the newer state the event just delivered (and the
+      // driver would tick against it until the bridge next changes state).
+      let eventSeen = false;
 
       // The initial read waits for the listener to be registered. Asking first
       // would leave a window where a change is neither in the answer we already
       // hold nor in an event we are not yet listening for, and nothing re-polls:
       // the UI would sit on a stale state for as long as the bridge stayed put.
       void listen(BRIDGE_EVENT, (event) => {
+        eventSeen = true;
         if (live) listener(event.payload.state);
       })
         .then((off) => {
@@ -69,7 +75,9 @@ export function makeBridgeStateSource({ listen, invoke }: BridgeStateDeps): Brid
         .then(() => invoke<BridgeState>("spotify_bridge_state"))
         .then(
           (state) => {
-            if (live) listener(state);
+            // A state change that arrived while the read was in flight is
+            // newer than the answer; keep it rather than rewinding.
+            if (live && !eventSeen) listener(state);
           },
           (error) => {
             console.warn("spotjam: could not read the bridge state", error);
