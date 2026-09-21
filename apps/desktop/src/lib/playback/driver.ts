@@ -350,6 +350,10 @@ export class PlaybackDriver {
     for (const command of commands) {
       if (this.stopped || this.mode_ !== "attached" || generation !== this.generation) return;
       if (!(await this.send(command))) continue;
+      // The send awaited: a detach/attach (→ forget, generation bump) can have
+      // landed during it. Appending anyway would hang the just-sent command's
+      // expectation on the fresh run, suppressing reconcile for its lifetime.
+      if (this.stopped || this.mode_ !== "attached" || generation !== this.generation) return;
       this.outstanding = [...this.outstanding, expectationFor(command, this.now())];
     }
   }

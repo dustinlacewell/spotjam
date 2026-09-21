@@ -522,6 +522,54 @@ describe("PlaybackDriver", () => {
     driver.stop();
   });
 
+  it("reissues a seek the client dropped during a send that raced attach()", async () => {
+    const { spotify, room, driver, invoke } = setup();
+    // This client drops any seek issued while the player is still playing.
+    spotify.dropSeekWhilePlaying = true;
+    room.pointer = pointerOn(A, Date.now());
+    driver.start();
+    await run(2000);
+    expect(spotify.trackUri).toBe(A);
+    expect(spotify.positionMs).toBeLessThan(5000);
+
+    // The room seeks to 2:00. The driver sends the seek — and the send is
+    // held in flight while the user presses Sync. attach() forgets: the
+    // outstanding list is cleared and the generation bumped.
+    room.update({ pointer: pointerOn(A, Date.now() - 120_000) });
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const inner = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "spotify_seek") {
+        // The race decides at send time whether the client takes the seek.
+        if (spotify.dropSeekWhilePlaying && !spotify.isPaused) {
+          spotify.calls.push({ cmd, args });
+        } else {
+          inner(cmd, args);
+        }
+        await gate;
+        return undefined;
+      }
+      return inner(cmd, args);
+    });
+    await run(TICK_MS * 3);
+    driver.attach();
+    // The race that made the client drop seeks is over now: a retry lands.
+    spotify.dropSeekWhilePlaying = false;
+    open();
+    invoke.mockImplementation(inner);
+
+    // The send awaited across the forget: hanging the dropped seek's
+    // expectation on the fresh run would suppress reconcile for its whole
+    // lifetime and the seek would never be tried again.
+    await run(2000);
+    expect(spotify.positionMs).toBeGreaterThanOrEqual(120_000);
+    // Two seeks: the one that raced the attach, and the fresh run's retry.
+    // Hanging the raced seek's expectation on the fresh run leaves only one.
+    expect(spotify.calls.filter((c) => c.cmd === "spotify_seek").length).toBeGreaterThanOrEqual(2);
+    driver.stop();
+  });
+
   it("detaches within one tick when the user picks their own track", async () => {
     const { spotify, room, driver } = setup();
     room.pointer = pointerOn(A, Date.now());

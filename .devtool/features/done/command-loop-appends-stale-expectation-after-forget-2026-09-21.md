@@ -1,15 +1,15 @@
 ---
 id: "command-loop-appends-stale-expectation-after-forget-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "low"
 assignee: null
 epic: "playback-driver"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:42.137Z"
-completedAt: null
+modified: "2026-09-22T01:16:36.346Z"
+completedAt: "2026-09-22T01:16:36.346Z"
 labels: ["created-by-ai", "sync", "bug"]
-order: "a28"
+order: "a1008"
 ---
 # Command loop re-appends a stale expectation after forget()
 
