@@ -21,6 +21,7 @@ pub use track_api::TrackMetadata;
 use cdp::CdpClient;
 use session::BridgeSession;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// The app's handle on the Spotify connection.
 ///
@@ -29,12 +30,21 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct SpotifyBridge {
     session: Arc<BridgeSession>,
+    /// Serializes `set_next_track` calls.
+    ///
+    /// The call is clear-then-add in two sequential awaits, and commands are
+    /// deliberately unsynchronized. Two concurrent invocations can interleave
+    /// across evaluations — clear, clear, add, add — and stack two queue
+    /// entries, which Spotify then plays both of. This gate is held across
+    /// the whole call so the second invocation waits instead of interleaving.
+    set_next_track_gate: Arc<Mutex<()>>,
 }
 
 impl SpotifyBridge {
     pub fn new() -> Self {
         Self {
             session: Arc::new(BridgeSession::new()),
+            set_next_track_gate: Arc::new(Mutex::new(())),
         }
     }
 
@@ -182,11 +192,16 @@ pub async fn spotify_observe(
 /// Makes the local queue hold exactly this track, so Spotify plays it next
 /// without a gap. Idempotent: calling it repeatedly with the same URI leaves
 /// a single queued entry.
+///
+/// Calls are serialized through `set_next_track_gate`: a clear-then-add that
+/// two invocations interleave across evaluations stacks two entries, because
+/// each add mints a fresh uid.
 #[tauri::command]
 pub async fn spotify_set_next_track(
     bridge: tauri::State<'_, SpotifyBridge>,
     uri: String,
 ) -> Result<(), String> {
+    let _gate = bridge.set_next_track_gate.lock().await;
     bridge
         .with_client(|client| Box::pin(player_api::set_next_track(client, uri)))
         .await
@@ -284,4 +299,41 @@ pub async fn spotify_fetch_tracks(
     bridge
         .with_client(|client| Box::pin(track_api::fetch_tracks(client, track_ids)))
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Two concurrent `set_next_track` invocations must not interleave: the
+    /// clear-then-add sequence of the second must not run inside the first's.
+    /// The gate is what enforces that, so the test drives it directly and
+    /// counts how many "calls" are ever inside the protected section at once.
+    #[tokio::test(start_paused = true)]
+    async fn concurrent_set_next_track_calls_do_not_overlap() {
+        let gate = Arc::new(Mutex::new(()));
+        let inside = Arc::new(AtomicUsize::new(0));
+        let max_inside = Arc::new(AtomicUsize::new(0));
+
+        let mut callers = Vec::new();
+        for _ in 0..2 {
+            let gate = gate.clone();
+            let inside = inside.clone();
+            let max_inside = max_inside.clone();
+            callers.push(tokio::spawn(async move {
+                let _guard = gate.lock().await;
+                let now = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                max_inside.fetch_max(now, Ordering::SeqCst);
+                // The page round trips yield: a serialized caller never sees
+                // another inside the section while it awaits.
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                inside.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+        for caller in callers {
+            caller.await.unwrap();
+        }
+        assert_eq!(max_inside.load(Ordering::SeqCst), 1);
+    }
 }

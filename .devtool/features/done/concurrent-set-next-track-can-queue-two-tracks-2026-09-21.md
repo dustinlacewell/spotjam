@@ -1,15 +1,15 @@
 ---
 id: "concurrent-set-next-track-can-queue-two-tracks-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "medium"
 assignee: null
 epic: "queue-semantics"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:36.774Z"
-completedAt: null
+modified: "2026-09-22T00:32:26.545Z"
+completedAt: "2026-09-22T00:32:26.545Z"
 labels: ["created-by-ai", "bridge", "queue", "bug"]
-order: "a3"
+order: "a102"
 ---
 # Concurrent set_next_track calls can leave two tracks queued
 
@@ -30,3 +30,12 @@ Fix: serialize `set_next_track` per session (a dedicated `Mutex<()>`
 around the command, or session-level single-flight), or make the JS
 atomic against concurrent replaces (page-side lock / last-write-wins
 token carried in the expression).
+
+## Resolution
+
+`set_next_track` calls are now serialized through a per-bridge `tokio::sync::Mutex<()>`
+gate held across the whole clear-then-add evaluation
+(`SpotifyBridge::set_next_track_gate`, apps/desktop/src-tauri/src/spotify/mod.rs).
+A concurrent invocation waits for the gate instead of interleaving across CDP
+evaluations, so clear/clear/add/add cannot stack two queue entries. A paused-clock
+tokio test asserts at most one caller is ever inside the protected section.
