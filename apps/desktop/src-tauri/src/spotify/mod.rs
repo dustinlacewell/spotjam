@@ -78,7 +78,7 @@ impl SpotifyBridge {
         >,
     ) -> Result<T, PlaylistError> {
         self.session
-            .with_client_typed(f, PlaylistError::unreachable_from, PlaylistError::message)
+            .with_client_typed(f, PlaylistError::unreachable_from, PlaylistError::describe)
             .await
     }
 }

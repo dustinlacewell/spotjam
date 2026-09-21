@@ -69,11 +69,20 @@ pub struct PlaylistTrack {
 
 /// Why a playlist fetch produced nothing.
 ///
-/// These two must never be confused at the call site. `Gone` is Spotify
+/// These must never be confused at the call site. `Gone` is Spotify
 /// answering that no such playlist exists, and the app acts on it by dropping
 /// the linked playlist. `Unreachable` is every case where we did not get an
 /// answer at all — client closed, connection dropped, call hung, service
 /// missing — and the app must leave the playlist untouched.
+///
+/// `Rejected` is our own validation refusing the caller's input before any
+/// evaluation runs — e.g. a paste that is not a playlist URI. Its error text
+/// echoes the caller's input verbatim, so it is provably not the page's
+/// words; `session.with_client_typed` therefore never feeds it to the
+/// stale-connection classifier (`describe` returns `None`). Without that
+/// carve-out a paste containing the classifier's own marker could demote a
+/// healthy bridge, because the classifier substring-matches a prefix this
+/// message may quote.
 ///
 /// Every ambiguous case classifies as `Unreachable`. A wrong `Unreachable`
 /// costs a retry; a wrong `Gone` deletes the user's playlist.
@@ -82,11 +91,21 @@ pub struct PlaylistTrack {
 pub enum PlaylistError {
     Gone { message: String },
     Unreachable { message: String },
+    Rejected { message: String },
 }
 
 impl PlaylistError {
     fn unreachable(message: impl std::fmt::Display) -> Self {
         Self::Unreachable {
+            message: message.to_string(),
+        }
+    }
+
+    /// A rejection of the caller's own input: the page never ran, so the
+    /// message is our words plus the caller's paste, and the session must
+    /// never read it for connection health.
+    pub(super) fn rejected(message: impl std::fmt::Display) -> Self {
+        Self::Rejected {
             message: message.to_string(),
         }
     }
@@ -99,9 +118,15 @@ impl PlaylistError {
 
     /// The failure text, for the session to judge whether the connection
     /// itself has stopped meaning anything.
-    pub(super) fn message(&self) -> String {
+    ///
+    /// `None` means "never judge this": a validation rejection embeds the
+    /// caller's own input, which may deliberately quote the classifier's
+    /// marker. Returning `None` is how `with_client_typed` knows to skip the
+    /// demotion check entirely.
+    pub(super) fn describe(&self) -> Option<String> {
         match self {
-            Self::Gone { message } | Self::Unreachable { message } => message.clone(),
+            Self::Rejected { .. } => None,
+            Self::Gone { message } | Self::Unreachable { message } => Some(message.clone()),
         }
     }
 }
@@ -158,7 +183,7 @@ async fn fetch_inner(
 ) -> std::result::Result<PlaylistContents, PlaylistError> {
     // A malformed link is the caller's mistake, not a missing playlist. It is
     // not "gone": nothing was ever linked to drop.
-    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::unreachable)?;
+    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::rejected)?;
     ensure_playlist_api(cdp)
         .await
         .map_err(PlaylistError::unreachable)?;
@@ -261,7 +286,7 @@ async fn add_inner(
         return Ok(());
     }
 
-    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::unreachable)?;
+    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::rejected)?;
     ensure_playlist_api(cdp)
         .await
         .map_err(PlaylistError::unreachable)?;
@@ -359,7 +384,7 @@ async fn remove_inner(
     if rows.is_empty() {
         return Ok(());
     }
-    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::unreachable)?;
+    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::rejected)?;
     ensure_playlist_api(cdp)
         .await
         .map_err(PlaylistError::unreachable)?;
@@ -418,7 +443,7 @@ async fn move_inner(
     if rows.is_empty() {
         return Ok(());
     }
-    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::unreachable)?;
+    let playlist_uri = normalise_playlist_uri(&uri).map_err(PlaylistError::rejected)?;
     ensure_playlist_api(cdp)
         .await
         .map_err(PlaylistError::unreachable)?;
@@ -520,6 +545,7 @@ fn validated_id(id: &str) -> Result<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spotify::registry;
 
     #[test]
     fn accepts_plain_uri() {
@@ -572,6 +598,57 @@ mod tests {
 
     fn is_gone(error: &PlaylistError) -> bool {
         matches!(error, PlaylistError::Gone { .. })
+    }
+
+    /// ADVERSARY. `normalise_playlist_uri` echoes the caller's raw paste into
+    /// its error, and `with_client_typed` feeds whatever `describe` hands
+    /// back to the stale-connection classifier, which substring-matches
+    /// `registry::STALE_PREFIX`. A user pasting text that carries that
+    /// literal prefix would demote a healthy bridge — the connection was
+    /// never even exercised, since the URI is rejected before any
+    /// evaluation. A rejection must therefore never be describable at all:
+    /// the classifier may never see the paste.
+    #[test]
+    fn a_validation_rejection_is_never_described_to_the_classifier() {
+        let pasted = format!("spotify:playlist: {} no React fiber found", registry::STALE_PREFIX);
+        let rejection = normalise_playlist_uri(&pasted).unwrap_err();
+
+        let as_error = PlaylistError::rejected(rejection);
+        assert!(
+            matches!(as_error, PlaylistError::Rejected { .. }),
+            "a URI the parser refuses must classify as a rejection"
+        );
+        assert!(
+            as_error.describe().is_none(),
+            "a rejection may never reach the classifier: its message embeds the paste"
+        );
+
+        // Both rejection paths embed the paste and must behave the same.
+        let bad_id = format!("spotify:playlist: {}", registry::STALE_PREFIX);
+        assert!(normalise_playlist_uri(&bad_id).is_err());
+    }
+
+    /// The other variants are still judged: `Unreachable` can be the page
+    /// walking failing, and `Gone` carries the page's own rejection.
+    #[test]
+    fn page_reachable_failures_are_still_described() {
+        assert!(PlaylistError::unreachable("getQueue failed").describe().is_some());
+        assert!(PlaylistError::Gone {
+            message: "Invalid playlist or members response!".into()
+        }
+        .describe()
+        .is_some());
+    }
+
+    /// The frontend's type only knows `gone` and `unreachable`; a new kind
+    /// must stay within the safe fallthrough there (anything unrecognised
+    /// reads as unreachable, never gone). Pinning the wire tag so it cannot
+    /// drift to `gone`.
+    #[test]
+    fn a_rejection_serializes_as_rejected_not_gone() {
+        let json = serde_json::to_value(PlaylistError::rejected("nope")).unwrap();
+        assert_eq!(json["kind"], "rejected");
+        assert_ne!(json["kind"], "gone");
     }
 
     #[test]

@@ -1,15 +1,15 @@
 ---
 id: "pasted-text-containing-stale-prefix-can-demote-bridge-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "low"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:38.410Z"
-completedAt: null
+modified: "2026-09-21T05:27:21.186Z"
+completedAt: "2026-09-21T05:27:21.186Z"
 labels: ["created-by-ai", "bridge", "bug"]
-order: "a4"
+order: "a3"
 ---
 # User paste containing the stale-error prefix can demote a healthy bridge
 

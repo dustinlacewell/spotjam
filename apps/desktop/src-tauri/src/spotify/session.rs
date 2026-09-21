@@ -371,7 +371,7 @@ impl BridgeSession {
         )
             -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, E>> + Send + 'a>>,
         unreachable: impl Fn(String) -> E,
-        describe: impl Fn(&E) -> String,
+        describe: impl Fn(&E) -> Option<String>,
     ) -> Result<T, E> {
         let client = match self.ready_client().await {
             Ok(client) => client,
@@ -380,7 +380,13 @@ impl BridgeSession {
 
         let result = f(&client).await;
         if let Err(error) = &result {
-            self.demote_if_meaningless(&client, &describe(error));
+            // `None` marks an error that is not the page's words — our own
+            // validation echoing the caller's input, which may deliberately
+            // quote the classifier's marker. Reading it could demote a
+            // healthy bridge over a paste.
+            if let Some(message) = describe(error) {
+                self.demote_if_meaningless(&client, &message);
+            }
         }
         result
     }
