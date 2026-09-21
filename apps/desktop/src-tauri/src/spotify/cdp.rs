@@ -47,6 +47,19 @@ pub struct CdpClient {
     >>,
     closed: watch::Receiver<bool>,
     events: broadcast::Sender<String>,
+    /// The reader owns the WebSocket's read half and would otherwise run
+    /// forever: it only ends when `read.next()` returns `None`, which needs
+    /// the socket closed, which needs both halves dropped — one of which the
+    /// reader itself holds. Keeping the handle lets `Drop` end it, which
+    /// drops the read half; the last `Arc` dropping the client drops the
+    /// write half. Only then is the socket actually closed.
+    reader: tauri::async_runtime::JoinHandle<()>,
+}
+
+impl Drop for CdpClient {
+    fn drop(&mut self) {
+        self.reader.abort();
+    }
 }
 
 impl CdpClient {
@@ -59,7 +72,7 @@ impl CdpClient {
 
         let pending_reader = pending.clone();
         let events_reader = events.clone();
-        tauri::async_runtime::spawn(async move {
+        let reader = tauri::async_runtime::spawn(async move {
             while let Some(msg) = read.next().await {
                 let Ok(Message::Text(text)) = msg else { continue };
                 let Ok(parsed) = serde_json::from_str::<Value>(&text) else { continue };
@@ -88,6 +101,7 @@ impl CdpClient {
             write: Mutex::new(write),
             closed: closed_rx,
             events,
+            reader,
         };
 
         // Without this the page sends no Runtime events, so a reload of xpui

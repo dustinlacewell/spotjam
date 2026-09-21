@@ -1,13 +1,13 @@
 ---
 id: "reconnect-leaks-cdp-reader-task-and-websocket-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "high"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:34.129Z"
-completedAt: null
+modified: "2026-09-21T07:51:22.915Z"
+completedAt: "2026-09-21T07:51:22.915Z"
 labels: ["created-by-ai", "bridge", "bug"]
 order: "a1"
 ---

@@ -392,9 +392,11 @@ impl BridgeSession {
     }
 
     /// Lets go of the client we hold, so nothing can be handed a socket that
-    /// belongs to a Spotify we can no longer reach. Dropping the last `Arc`
-    /// also ends its reader task, which is what keeps a long session of
-    /// reconnects from accumulating one per attempt.
+    /// belongs to a Spotify we can no longer reach. `CdpClient`'s `Drop`
+    /// aborts its reader task (which owns the socket's read half), and the
+    /// last `Arc` dropping the client drops the write half — only then does
+    /// the socket actually close, so each replaced client leaves no reader
+    /// task or WebSocket behind.
     async fn drop_client(&self) {
         self.client.write().await.take();
     }
