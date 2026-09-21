@@ -3,7 +3,7 @@ id: "queue-restore-validation-skips-durationms-and-wipes-queue-2026-09-21"
 status: "backlog"
 priority: "high"
 assignee: null
-epic: null
+epic: "queue-semantics"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
 modified: "2026-09-21T04:17:47.192Z"

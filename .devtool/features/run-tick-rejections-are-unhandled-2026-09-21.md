@@ -3,7 +3,7 @@ id: "run-tick-rejections-are-unhandled-2026-09-21"
 status: "backlog"
 priority: "low"
 assignee: null
-epic: null
+epic: "playback-driver"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
 modified: "2026-09-21T04:17:45.166Z"

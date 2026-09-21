@@ -3,7 +3,7 @@ id: "concurrent-set-next-track-can-queue-two-tracks-2026-09-21"
 status: "backlog"
 priority: "medium"
 assignee: null
-epic: null
+epic: "queue-semantics"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
 modified: "2026-09-21T04:17:36.774Z"

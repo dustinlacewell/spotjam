@@ -3,7 +3,7 @@ id: "watch-ready-wedges-when-a-command-demotes-bridge-to-lost-2026-09-21"
 status: "done"
 priority: "high"
 assignee: null
-epic: null
+epic: "bridge-demote"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
 modified: "2026-09-21T05:25:38.169Z"

@@ -3,7 +3,7 @@ id: "pasted-text-containing-stale-prefix-can-demote-bridge-2026-09-21"
 status: "done"
 priority: "low"
 assignee: null
-epic: null
+epic: "bridge-demote"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
 modified: "2026-09-21T05:27:21.186Z"

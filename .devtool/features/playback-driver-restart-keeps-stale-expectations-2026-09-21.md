@@ -3,7 +3,7 @@ id: "playback-driver-restart-keeps-stale-expectations-2026-09-21"
 status: "backlog"
 priority: "high"
 assignee: null
-epic: null
+epic: "playback-driver"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
 modified: "2026-09-21T04:17:39.849Z"
