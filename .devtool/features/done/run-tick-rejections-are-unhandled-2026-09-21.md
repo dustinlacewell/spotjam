@@ -1,15 +1,15 @@
 ---
 id: "run-tick-rejections-are-unhandled-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "low"
 assignee: null
 epic: "playback-driver"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:45.166Z"
-completedAt: null
+modified: "2026-09-22T01:17:17.013Z"
+completedAt: "2026-09-22T01:17:17.013Z"
 labels: ["created-by-ai", "sync", "bug"]
-order: "a22"
+order: "a1004"
 ---
 # Unguarded void this.tick() / .finally() chains swallow and leak rejections
 

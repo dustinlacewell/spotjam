@@ -976,6 +976,29 @@ describe("PlaybackDriver", () => {
     expect(spotify.calls.length).toBe(after);
   });
 
+  it("keeps reconciling when a tick throws", async () => {
+    const { spotify, room, driver } = setup();
+    room.pointer = pointerOn(A, Date.now());
+    driver.start();
+    await run(2000);
+    expect(spotify.trackUri).toBe(A);
+
+    // A room snapshot the driver cannot digest. The tick fails — that must
+    // surface as one reported error, not as an unhandled rejection leaking
+    // from every `void this.tick()` call site, and the loop must go on.
+    const spy = vi.spyOn(room, "getPlaybackPointer").mockImplementation(() => {
+      throw new Error("malformed pointer");
+    });
+    await run(TICK_MS * 2);
+    expect(driver.mode()).toBe("attached");
+
+    // A good snapshot lands: the loop is still reconciling.
+    spy.mockRestore();
+    await run(2000);
+    expect(spotify.trackUri).toBe(A);
+    driver.stop();
+  });
+
   it("survives a bridge that refuses every command", async () => {
     const { room, driver, invoke } = setup();
     invoke.mockRejectedValue(new Error("bridge is down"));

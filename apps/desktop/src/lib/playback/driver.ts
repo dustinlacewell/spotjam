@@ -209,6 +209,11 @@ export class PlaybackDriver {
     this.ticking = true;
     try {
       await this.runTick();
+    } catch (error) {
+      // One bad reading (malformed pointer, bad queue entry) must not become an
+      // unhandled rejection on every `void this.tick()` call site, nor escape
+      // through schedule()'s `.finally`. Report it; the loop keeps ticking.
+      this.report("tick", error);
     } finally {
       this.ticking = false;
     }
