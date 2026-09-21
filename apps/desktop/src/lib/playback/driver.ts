@@ -128,6 +128,13 @@ export class PlaybackDriver {
     this.unsubscribeRoom = null;
     this.unsubscribeBridge?.();
     this.unsubscribeBridge = null;
+    // Anything we knew about the player describes the run that has just ended.
+    // Keeping it would make the first tick after a restart blame the user for
+    // a gap the stopped run never commanded — the stale-`prev` detach.
+    this.forget();
+    this.stuck = freshStuck();
+    this.lastStuck = [];
+    this.lastItemId = null;
   }
 
   mode(): Mode {

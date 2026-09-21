@@ -891,6 +891,31 @@ describe("PlaybackDriver", () => {
     driver.stop();
   });
 
+  it("restarts without blaming the user for a move made while stopped", async () => {
+    const { spotify, room, driver } = setup();
+    const startedAt = Date.now();
+    room.pointer = pointerOn(A, startedAt);
+    room.queue = [entry(B)];
+    driver.start();
+    await run(2000);
+    expect(spotify.trackUri).toBe(A);
+
+    // Leaving the room stops the driver. While nobody is watching, Spotify
+    // steps into the queued track by itself.
+    driver.stop();
+    spotify.runOutIntoQueue();
+    room.update({ pointer: pointerOn(B, startedAt + TRACK_MS), queue: [] });
+    await run(300);
+
+    // Rejoining restarts it. The run that stopped never commanded this move —
+    // but comparing the old reading against the fresh one would see exactly
+    // that, blame the user, and detach at once.
+    driver.start();
+    await run(TICK_MS * 2);
+    expect(driver.mode()).toBe("attached");
+    driver.stop();
+  });
+
   it("issues nothing after stop()", async () => {
     const { spotify, room, driver } = setup();
     room.pointer = pointerOn(A, Date.now());

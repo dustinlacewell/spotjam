@@ -1,15 +1,15 @@
 ---
 id: "playback-driver-restart-keeps-stale-expectations-2026-09-21"
-status: "backlog"
+status: "done"
 priority: "high"
 assignee: null
 epic: "playback-driver"
 dueDate: null
 created: "2026-09-21T04:13:10.000Z"
-modified: "2026-09-21T04:17:39.849Z"
-completedAt: null
+modified: "2026-09-22T01:16:01.243Z"
+completedAt: "2026-09-22T01:16:01.243Z"
 labels: ["created-by-ai", "sync", "bug"]
-order: "a2V"
+order: "a100G"
 ---
 # PlaybackDriver.stop() leaves stale prev/outstanding; first tick after restart detaches
 
