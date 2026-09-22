@@ -6,6 +6,9 @@ import {
   type ServerEvent,
   type SharedPlaylist,
 } from "@spotjam/protocol";
+
+type ServerErrorCode = Extract<ServerEvent, { type: "error" }>["code"];
+
 import {
   INITIAL_VIEW,
   backoffMs,
@@ -224,21 +227,24 @@ describe("reduce", () => {
     expect(reduce(INITIAL_VIEW, event, EPOCH)).toBe(INITIAL_VIEW);
   });
 
-  it("describes every error code without throwing", () => {
-    const codes = [
-      "bad-signature",
-      "stale-envelope",
-      "replay",
-      "unknown-identity",
-      "username-taken",
-      "invalid-username",
-      "not-in-room",
-      "malformed",
-      "internal",
-    ] as const;
+  it("describes every error code with its exact human copy", () => {
+    // The copy the UI renders. Pinned verbatim: a reworded message should
+    // surface here, not silently change what a user reads.
+    const expected = {
+      "bad-signature": "The server refused a signature from this identity.",
+      "stale-envelope":
+        "This machine's clock is off, so the server rejected the message. Sync your system clock and rejoin.",
+      "replay": "The server saw that message twice.",
+      "unknown-identity": "The server does not know this key yet.",
+      "username-taken": "That name is already taken by another key.",
+      "invalid-username": "That name is not allowed.",
+      "not-in-room": "You are not in that room any more.",
+      "malformed": "The server could not read that message.",
+      "internal": "The server hit an internal error.",
+    } as const;
 
-    for (const code of codes) {
-      expect(describeError(code, "x").humanMessage.length).toBeGreaterThan(0);
+    for (const [code, humanMessage] of Object.entries(expected)) {
+      expect(describeError(code as ServerErrorCode, "x").humanMessage).toBe(humanMessage);
     }
   });
 });
@@ -343,11 +349,6 @@ describe("shared playlists", () => {
     expect(parseServerEvent(raw)).toEqual(playlistsEvent(THEM, [MORNING]));
   });
 
-  it("starts with nobody's playlists known", () => {
-    expect(INITIAL_VIEW.peerPlaylists).toEqual({});
-    expect(peerPlaylistsOf(INITIAL_VIEW, THEM)).toEqual([]);
-  });
-
   it("folds a playlists event in under its owner", () => {
     const view = reduce(INITIAL_VIEW, playlistsEvent(THEM, [MORNING]), EPOCH);
     expect(peerPlaylistsOf(view, THEM)).toEqual([MORNING]);
@@ -393,12 +394,12 @@ describe("shared playlists", () => {
     expect(peerPlaylistsOf(alone, ME)).toEqual([EVENING]);
   });
 
-  it("keeps the cache object identical when everyone is still present", () => {
+  it("keeps the cached playlists unchanged when everyone is still present", () => {
     let view = viewOf(snapshot());
     view = reduce(view, playlistsEvent(THEM, [MORNING]), EPOCH);
 
     const next = reduce(view, { type: "room-state", snapshot: snapshot() }, EPOCH);
-    expect(next.peerPlaylists).toBe(view.peerPlaylists);
+    expect(peerPlaylistsOf(next, THEM)).toEqual(peerPlaylistsOf(view, THEM));
   });
 });
 

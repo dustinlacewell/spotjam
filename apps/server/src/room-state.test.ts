@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import * as Room from "./room-state.ts";
 import type { RoomState } from "./room-state.ts";
-import { seededRng } from "./testing.ts";
+import { seededRng, track, trackIds } from "./testing.ts";
 
 const ALICE = "a".repeat(64);
 const BOB = "b".repeat(64);
@@ -17,18 +17,10 @@ const CAROL = "c".repeat(64);
 const NOW = 1_700_000_000_000;
 const MINUTE = 60_000;
 
-function track(id: string, durationMs = 3 * MINUTE): QueueItem {
-  return { id, uri: `spotify:track:${id}`, trackId: id, durationMs };
-}
-
 function roomWith(...people: Array<[string, string]>): RoomState {
   let state = Room.emptyRoom("jam");
   for (const [pubkey, name] of people) state = Room.join(state, pubkey, name);
   return state;
-}
-
-function ids(state: RoomState, pubkey: string): string[] {
-  return (state.members.get(pubkey)?.queue ?? []).map((item) => item.id);
 }
 
 describe("membership", () => {
@@ -78,7 +70,7 @@ describe("queue operations", () => {
     state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
     state = Room.enqueue(state, ALICE, [track("t3")]);
 
-    expect(ids(state, ALICE)).toEqual(["t1", "t2", "t3"]);
+    expect(trackIds(state, ALICE)).toEqual(["t1", "t2", "t3"]);
   });
 
   it("drops an item the queue already holds", () => {
@@ -87,7 +79,7 @@ describe("queue operations", () => {
     state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
     state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
 
-    expect(ids(state, ALICE)).toEqual(["t1", "t2"]);
+    expect(trackIds(state, ALICE)).toEqual(["t1", "t2"]);
   });
 
   it("keeps the fresh items out of a partly duplicate batch", () => {
@@ -95,14 +87,14 @@ describe("queue operations", () => {
     state = Room.enqueue(state, ALICE, [track("t1")]);
     state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
 
-    expect(ids(state, ALICE)).toEqual(["t1", "t2"]);
+    expect(trackIds(state, ALICE)).toEqual(["t1", "t2"]);
   });
 
   it("drops a duplicate within one batch", () => {
     let state = roomWith([ALICE, "alice"]);
     state = Room.enqueue(state, ALICE, [track("t1"), track("t1")]);
 
-    expect(ids(state, ALICE)).toEqual(["t1"]);
+    expect(trackIds(state, ALICE)).toEqual(["t1"]);
   });
 
   it("drops a fresh item for a track the queue already holds, keeping the existing one", () => {
@@ -116,15 +108,15 @@ describe("queue operations", () => {
     state = Room.enqueue(state, ALICE, [track("t1")]);
     state = Room.enqueue(state, ALICE, [again, track("t2")]);
 
-    expect(ids(state, ALICE)).toEqual(["t1", "t2"]);
+    expect(trackIds(state, ALICE)).toEqual(["t1", "t2"]);
   });
 
   it("never mutates the input state", () => {
     const before = Room.enqueue(roomWith([ALICE, "alice"]), ALICE, [track("t1")]);
     const after = Room.enqueue(before, ALICE, [track("t2")]);
 
-    expect(ids(before, ALICE)).toEqual(["t1"]);
-    expect(ids(after, ALICE)).toEqual(["t1", "t2"]);
+    expect(trackIds(before, ALICE)).toEqual(["t1"]);
+    expect(trackIds(after, ALICE)).toEqual(["t1", "t2"]);
   });
 
   it("removes by item id", () => {
@@ -132,7 +124,7 @@ describe("queue operations", () => {
     state = Room.enqueue(state, ALICE, [track("t1"), track("t2")]);
     state = Room.remove(state, ALICE, "t1");
 
-    expect(ids(state, ALICE)).toEqual(["t2"]);
+    expect(trackIds(state, ALICE)).toEqual(["t2"]);
   });
 
   it("moves a block of items together, keeping their relative order", () => {
@@ -140,7 +132,7 @@ describe("queue operations", () => {
     state = Room.enqueue(state, ALICE, [track("t1"), track("t2"), track("t3"), track("t4")]);
     state = Room.moveMany(state, ALICE, ["t4", "t2"], "t1");
 
-    expect(ids(state, ALICE)).toEqual(["t2", "t4", "t1", "t3"]);
+    expect(trackIds(state, ALICE)).toEqual(["t2", "t4", "t1", "t3"]);
   });
 
   it("moves a block to the end when beforeItemId is null", () => {
@@ -148,7 +140,7 @@ describe("queue operations", () => {
     state = Room.enqueue(state, ALICE, [track("t1"), track("t2"), track("t3")]);
     state = Room.moveMany(state, ALICE, ["t1"], null);
 
-    expect(ids(state, ALICE)).toEqual(["t2", "t3", "t1"]);
+    expect(trackIds(state, ALICE)).toEqual(["t2", "t3", "t1"]);
   });
 
   it("sends an item to the top", () => {
@@ -156,14 +148,14 @@ describe("queue operations", () => {
     state = Room.enqueue(state, ALICE, [track("t1"), track("t2"), track("t3")]);
     state = Room.sendToTop(state, ALICE, "t3");
 
-    expect(ids(state, ALICE)).toEqual(["t3", "t1", "t2"]);
+    expect(trackIds(state, ALICE)).toEqual(["t3", "t1", "t2"]);
   });
 
   it("leaves the queue alone when send-to-top names nothing", () => {
     let state = roomWith([ALICE, "alice"]);
     state = Room.enqueue(state, ALICE, [track("t1")]);
 
-    expect(ids(Room.sendToTop(state, ALICE, "nope"), ALICE)).toEqual(["t1"]);
+    expect(trackIds(Room.sendToTop(state, ALICE, "nope"), ALICE)).toEqual(["t1"]);
   });
 
   it("shuffles deterministically under a seeded rng", () => {
@@ -174,15 +166,15 @@ describe("queue operations", () => {
     const once = Room.shuffle(state, ALICE, seededRng(42));
     const twice = Room.shuffle(state, ALICE, seededRng(42));
 
-    expect(ids(once, ALICE)).toEqual(ids(twice, ALICE));
-    expect([...ids(once, ALICE)].sort()).toEqual(["t1", "t2", "t3", "t4", "t5"]);
+    expect(trackIds(once, ALICE)).toEqual(trackIds(twice, ALICE));
+    expect([...trackIds(once, ALICE)].sort()).toEqual(["t1", "t2", "t3", "t4", "t5"]);
   });
 
   it("clears a queue", () => {
     let state = roomWith([ALICE, "alice"]);
     state = Room.enqueue(state, ALICE, [track("t1")]);
 
-    expect(ids(Room.clearQueue(state, ALICE), ALICE)).toEqual([]);
+    expect(trackIds(Room.clearQueue(state, ALICE), ALICE)).toEqual([]);
   });
 
   it("ignores queue ops from a non-member", () => {
@@ -196,8 +188,8 @@ describe("queue operations", () => {
     state = Room.enqueue(state, BOB, [track("b1")]);
     state = Room.clearQueue(state, ALICE);
 
-    expect(ids(state, ALICE)).toEqual([]);
-    expect(ids(state, BOB)).toEqual(["b1"]);
+    expect(trackIds(state, ALICE)).toEqual([]);
+    expect(trackIds(state, BOB)).toEqual(["b1"]);
   });
 });
 
@@ -223,7 +215,7 @@ describe("advance", () => {
       isPaused: false,
       durationMs: 3 * MINUTE,
     });
-    expect(ids(state, ALICE)).toEqual(["t2"]);
+    expect(trackIds(state, ALICE)).toEqual(["t2"]);
   });
 
   it("alternates between broadcasters round-robin", () => {
@@ -301,7 +293,7 @@ describe("settleStart", () => {
       ownerPubkey: ALICE,
       startedAtEpochMs: NOW,
     });
-    expect(ids(state, ALICE)).toEqual(["t2"]);
+    expect(trackIds(state, ALICE)).toEqual(["t2"]);
   });
 
   it("leaves a pointer that already names a track", () => {

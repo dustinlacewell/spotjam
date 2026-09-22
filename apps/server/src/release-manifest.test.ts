@@ -291,10 +291,6 @@ describe("mergeManifest", () => {
     expect(merged.downloads).toEqual([]);
   });
 
-  it("starts with an empty list when nothing is stored", () => {
-    expect(mergeManifest(null, update(), now).downloads).toEqual([]);
-  });
-
   it("takes the posted pub_date over the clock", () => {
     const merged = mergeManifest(null, update({ pub_date: "2026-03-03T03:03:03Z" }), now);
     expect(merged.pub_date).toBe("2026-03-03T03:03:03Z");

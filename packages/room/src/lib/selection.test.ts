@@ -49,7 +49,8 @@ describe("applySelectionClick", () => {
 
   it("falls back to a plain click when shift has no anchor", () => {
     const next = applySelectionClick(emptySelection, IDS, "c", SHIFT);
-    expect([...next.ids]).toEqual(["c"]);
+    // Pinned equivalent to the plain-click path, not merely to its result.
+    expect(next).toEqual(applySelectionClick(emptySelection, IDS, "c", PLAIN));
     expect(next.anchorId).toBe("c");
   });
 

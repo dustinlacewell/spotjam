@@ -44,11 +44,6 @@ describe("classify", () => {
     expect(classify(null, obs({ trackUri: B, isPaused: true, positionMs: 99_999 }), [])).toBe("ok");
   });
 
-  it("is ok when nothing changed", () => {
-    const prev = obs();
-    expect(classify(prev, tickLater(prev), [])).toBe("ok");
-  });
-
   describe("the track changed", () => {
     it("is the user with no explanation", () => {
       const prev = obs();

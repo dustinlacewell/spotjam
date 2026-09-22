@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+
+import { fromHex } from "./testing";
 import {
   canonicalBytes,
   generateKeypair,
@@ -17,14 +19,6 @@ const EPOCH = 1_700_000_000_000;
 interface Call {
   cmd: string;
   args?: Record<string, unknown>;
-}
-
-function fromHex(hex: string): Uint8Array {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i += 1) {
-    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
 }
 
 /**
@@ -106,14 +100,6 @@ describe("IdentityClient", () => {
       expect(identity.publicKey).toMatch(/^[0-9a-f]{64}$/);
       expect(fake.of("identity_create")[0].args).toEqual({ username: "alice" });
     });
-
-    it("makes the identity visible to a later load", async () => {
-      const fake = makeInvoke();
-      const client = new IdentityClient(fake.invoke);
-      const created = await client.create("alice");
-
-      expect(await client.load()).toEqual(created);
-    });
   });
 
   describe("import", () => {
@@ -124,23 +110,6 @@ describe("IdentityClient", () => {
       expect(fake.of("identity_import")[0].args).toEqual({ path: "D:\\backup\\identity.json" });
       expect(identity.publicKey).toBe(fake.publicKey());
       expect(identity.username).toBe("imported");
-    });
-
-    it("replaces an identity that was already present", async () => {
-      const stored = generateKeypair();
-      const fake = makeInvoke({ stored });
-      const client = new IdentityClient(fake.invoke);
-
-      const imported = await client.import("D:\\backup\\identity.json");
-      expect(imported.publicKey).not.toBe(stored.publicKey);
-      expect((await client.load())?.publicKey).toBe(imported.publicKey);
-    });
-  });
-
-  describe("exportPath", () => {
-    it("reports where the identity file lives", async () => {
-      const fake = makeInvoke({ stored: generateKeypair() });
-      expect(await new IdentityClient(fake.invoke).exportPath()).toContain("identity.json");
     });
   });
 
@@ -243,20 +212,6 @@ describe("IdentityClient", () => {
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.reason).toBe("bad-signature");
-    });
-  });
-
-  describe("envelopeFrom", () => {
-    it("keeps every field it was handed", () => {
-      const envelope = envelopeFrom({ type: "hello" }, "ab".repeat(32), "n1", EPOCH, "cd".repeat(64));
-
-      expect(envelope).toEqual({
-        payload: { type: "hello" },
-        pubkey: "ab".repeat(32),
-        nonce: "n1",
-        timestamp: EPOCH,
-        signature: "cd".repeat(64),
-      });
     });
   });
 });

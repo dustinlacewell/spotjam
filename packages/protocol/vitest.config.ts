@@ -1,11 +1,6 @@
-/// <reference types="vitest/config" />
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  plugins: [react()],
-  base: "/",
-
   test: {
     // Persist transformed modules between runs (see docs/development/scoped-testing.md).
     fsModuleCache: true,

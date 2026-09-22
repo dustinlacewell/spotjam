@@ -13,10 +13,6 @@ describe("filterPlaylists", () => {
     expect(filterPlaylists(NAMED, "")).toEqual(NAMED);
   });
 
-  it("returns every playlist for a whitespace query", () => {
-    expect(filterPlaylists(NAMED, "   ")).toEqual(NAMED);
-  });
-
   it("matches without regard to case", () => {
     expect(filterPlaylists(NAMED, "morning").map((p) => p.id)).toEqual(["1", "4"]);
   });
@@ -27,6 +23,8 @@ describe("filterPlaylists", () => {
 
   it("ignores surrounding whitespace in the query", () => {
     expect(filterPlaylists(NAMED, "  focus  ").map((p) => p.id)).toEqual(["3"]);
+    // Trimming to nothing is not a filter either.
+    expect(filterPlaylists(NAMED, "   ")).toEqual(NAMED);
   });
 
   it("returns nothing when no name matches", () => {
@@ -54,17 +52,14 @@ describe("filterPlaylists", () => {
 });
 
 describe("shouldShowFilter", () => {
-  it("stays hidden at the threshold", () => {
+  it("stays hidden at or below the threshold", () => {
+    expect(shouldShowFilter(0)).toBe(false);
+    expect(shouldShowFilter(1)).toBe(false);
     expect(shouldShowFilter(FILTER_THRESHOLD)).toBe(false);
     expect(shouldShowFilter(5)).toBe(false);
   });
 
   it("appears one past the threshold", () => {
     expect(shouldShowFilter(6)).toBe(true);
-  });
-
-  it("stays hidden for a short list", () => {
-    expect(shouldShowFilter(0)).toBe(false);
-    expect(shouldShowFilter(1)).toBe(false);
   });
 });

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+
+import { fromHex } from "./testing";
 import {
   generateKeypair,
   signBytes,
@@ -16,14 +18,6 @@ import {
   type ConnectionStatus,
   type SocketLike,
 } from "./connection";
-
-function fromHex(hex: string): Uint8Array {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i += 1) {
-    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
 
 function makeIdentity(keypair: Keypair): IdentityClient {
   const invoke = async <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {

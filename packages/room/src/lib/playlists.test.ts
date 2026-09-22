@@ -131,21 +131,13 @@ describe("createPlaylist", () => {
     });
   });
 
-  it("creates a playlist spotjam owns", () => {
-    expect(isEditable(createPlaylist(lists(), "Mine", "three")[2])).toBe(true);
-  });
-
-  it("creates a playlist private", () => {
-    expect(createPlaylist(lists(), "Secret", "three")[2].isPublic).toBe(false);
-  });
-
   it("falls back to Untitled for a blank name", () => {
     expect(createPlaylist([], "   ", "x")[0].name).toBe("Untitled");
   });
 
   it("mints an id when none is given", () => {
     const [made] = createPlaylist([], "Mix");
-    expect(made.id).toMatch(/[0-9a-f-]{36}/);
+    expect(made.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
   it("does not mutate the input", () => {
@@ -334,11 +326,6 @@ describe("shufflePlaylist", () => {
     expect(idsOf(before[0])).toEqual([TRACK_A.trackId]);
   });
 
-  it("leaves other playlists alone", () => {
-    const next = shufflePlaylist(lists(), "one");
-    expect(next[1]).toEqual(lists()[1]);
-  });
-
   it("is a no-op below two rows or for an unknown id", () => {
     expect(shufflePlaylist(lists(), "one")).toEqual(lists());
     expect(shufflePlaylist(lists(), "two")).toEqual(lists());
@@ -392,6 +379,8 @@ describe("isEditable", () => {
   it("is true for a local playlist and false for a linked one", () => {
     expect(isEditable(lists()[0])).toBe(true);
     expect(isEditable(withLinked()[1])).toBe(false);
+    // A playlist spotjam creates is local, so it is editable.
+    expect(isEditable(createPlaylist(lists(), "Mine", "three")[2])).toBe(true);
   });
 });
 

@@ -28,6 +28,7 @@ import { WebSocket } from "ws";
 
 import { MemoryIdentityStore } from "./identity-store.ts";
 import { startServer, type RunningServer } from "./server.ts";
+import { waitFor } from "./testing.ts";
 
 let running: RunningServer | null = null;
 const opened: Client[] = [];
@@ -188,16 +189,6 @@ function track(id: string): { [key: string]: CanonicalValue } {
 
 function ids(snapshot: RoomSnapshot): string[] {
   return snapshot.sessionQueue.map((entry) => entry.item.id);
-}
-
-/** Poll until the predicate holds, rather than sleeping a guessed interval. */
-async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error("condition never became true");
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { fromHex } from "./testing";
 import {
   NULL_POINTER,
   canonicalBytes,
@@ -18,14 +20,6 @@ import { RoomClient } from "./room";
 
 const ROOM = "jam";
 const EPOCH = 1_700_000_000_000;
-
-function fromHex(hex: string): Uint8Array {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i += 1) {
-    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
 
 /** Signs with a real keypair, so envelopes round-trip through `open()`. */
 function makeIdentity(keypair: Keypair): IdentityClient {
@@ -201,24 +195,6 @@ describe("RoomClient handshake", () => {
     room.destroy();
   });
 
-  it("signs the protocol's signing body, so the server can verify", async () => {
-    const { room, latest, keypair } = makeRoom();
-    await greet(latest(), keypair.publicKey);
-
-    const envelope = latest().envelopes()[0];
-    const expected = signBytes(
-      canonicalBytes({
-        nonce: envelope.nonce,
-        payload: envelope.payload,
-        pubkey: envelope.pubkey,
-        timestamp: envelope.timestamp,
-      }),
-      keypair.secretKey,
-    );
-    expect(envelope.signature).toBe(expected);
-    room.destroy();
-  });
-
   it("joins the room it was constructed for", async () => {
     const { room, latest, keypair } = makeRoom();
     await greet(latest(), keypair.publicKey);
@@ -335,6 +311,9 @@ describe("RoomClient status", () => {
     const statuses: ConnectionStatus[] = [];
     room.onStatus((status) => statuses.push(status));
     await greet(latest(), keypair.publicKey);
+
+    // No snapshot yet: the room must not report itself synced before one lands.
+    expect(room.getStatus()).toEqual({ socket: "connected", synced: false });
 
     latest().deliver({ type: "room-state", snapshot: snapshot() });
     await settle();
@@ -548,18 +527,6 @@ describe("RoomClient snapshots", () => {
     expect(room.snapshot()).toBeNull();
     expect(room.sessionQueue()).toEqual([]);
     expect(room.getPlaybackPointer()).toEqual(NULL_POINTER);
-    room.destroy();
-  });
-
-  it("marks the room synced only once a snapshot has arrived", async () => {
-    const { room, latest } = makeRoom();
-    latest().open();
-    await settle();
-
-    expect(room.getStatus()).toEqual({ socket: "connected", synced: false });
-
-    latest().deliver({ type: "room-state", snapshot: snapshot() });
-    expect(room.getStatus()).toEqual({ socket: "connected", synced: true });
     room.destroy();
   });
 

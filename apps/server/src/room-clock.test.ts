@@ -1,10 +1,9 @@
-import { type QueueItem } from "@spotjam/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { RoomClock } from "./room-clock.ts";
 import * as Room from "./room-state.ts";
 import { RoomRegistry } from "./rooms.ts";
-import { FakeClock, FakeTimers } from "./testing.ts";
+import { FakeClock, FakeTimers, track } from "./testing.ts";
 
 const ALICE = "a".repeat(64);
 const MINUTE = 60_000;
@@ -31,10 +30,6 @@ beforeEach(() => {
     },
   });
 });
-
-function track(id: string, durationMs: number): QueueItem {
-  return { id, uri: `spotify:track:${id}`, trackId: id, durationMs };
-}
 
 /** Commit a room where Alice is broadcasting `durations`, playing from now. */
 function playing(...durations: number[]): void {

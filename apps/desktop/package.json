@@ -8,6 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:lib": "vitest run src/lib",
+    "test:playback": "vitest run src/lib/playback",
     "tauri": "tauri"
   },
   "dependencies": {

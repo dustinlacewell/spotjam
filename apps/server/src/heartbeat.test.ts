@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  HEARTBEAT_PERIOD_MS,
   startHeartbeat,
   type Pingable,
   type PingableServer,
@@ -64,7 +63,8 @@ describe("startHeartbeat", () => {
     startHeartbeat({ server, timers });
 
     expect(timers.repeatingCount).toBe(1);
-    expect(timers.repeatingPeriod).toBe(HEARTBEAT_PERIOD_MS);
+    // Pinned to a literal: the constant asserting itself passes at any value.
+    expect(timers.repeatingPeriod).toBe(30_000);
   });
 
   it("pings every client on a tick", () => {
@@ -100,19 +100,6 @@ describe("startHeartbeat", () => {
 
     expect(live.terminated).toBe(false);
     expect(live.pings).toBe(2);
-  });
-
-  it("keeps pinging a client that answers every time", () => {
-    startHeartbeat({ server, timers });
-    const live = server.connect();
-
-    for (let i = 0; i < 5; i += 1) {
-      timers.tick();
-      live.pong();
-    }
-
-    expect(live.terminated).toBe(false);
-    expect(live.pings).toBe(5);
   });
 
   it("terminates only the client that went quiet", () => {

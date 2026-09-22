@@ -14,15 +14,10 @@ describe("trackProgressView", () => {
 
   // The reported bug: a real track played and the elapsed clock read "-:--".
   it("ticks the elapsed clock but hides the length when it is unknown", () => {
-    const view = trackProgressView(30_000, 0);
-
-    expect(view.elapsedText).toBe("0:30");
-    expect(view.trailingText).toBe(PLACEHOLDER_CLOCK);
-  });
-
-  it("draws no fill and refuses seeking when the length is unknown", () => {
     // A bar with a position inside an unknown length would be a lie.
-    expect(trackProgressView(30_000, 0)).toMatchObject({
+    expect(trackProgressView(30_000, 0)).toEqual({
+      elapsedText: "0:30",
+      trailingText: PLACEHOLDER_CLOCK,
       fraction: 0,
       seekable: false,
       indeterminate: true,

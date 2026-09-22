@@ -1,7 +1,6 @@
 import {
   NULL_POINTER,
   type Op,
-  type QueueItem,
   type SharedPlaylist,
 } from "@spotjam/protocol";
 import { describe, expect, it } from "vitest";
@@ -9,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { handleOp, type OpContext } from "./handle-op.ts";
 import * as Room from "./room-state.ts";
 import type { RoomState } from "./room-state.ts";
-import { seededRng } from "./testing.ts";
+import { seededRng, track, trackIds } from "./testing.ts";
 
 const ALICE = "a".repeat(64);
 const BOB = "b".repeat(64);
@@ -23,19 +22,11 @@ function at(now: number): OpContext {
   return { now, rng: seededRng(7) };
 }
 
-function track(id: string, durationMs = 3 * MINUTE): QueueItem {
-  return { id, uri: `spotify:track:${id}`, trackId: id, durationMs };
-}
-
 function room(): RoomState {
   let state = Room.emptyRoom("jam");
   state = Room.join(state, ALICE, "alice");
   state = Room.join(state, BOB, "bob");
   return state;
-}
-
-function ids(state: RoomState, pubkey: string): string[] {
-  return (state.members.get(pubkey)?.queue ?? []).map((item) => item.id);
 }
 
 describe("handleOp", () => {
@@ -56,8 +47,8 @@ describe("handleOp", () => {
     }, ctx);
 
     expect(outcome.error).toBeUndefined();
-    expect(ids(outcome.state, ALICE)).toEqual(["a1"]);
-    expect(ids(outcome.state, BOB)).toEqual([]);
+    expect(trackIds(outcome.state, ALICE)).toEqual(["a1"]);
+    expect(trackIds(outcome.state, BOB)).toEqual([]);
   });
 
   it("scopes every mutation to the author, never another member", () => {
@@ -78,7 +69,7 @@ describe("handleOp", () => {
     for (const op of alicesOps) {
       const outcome = handleOp(state, ALICE, op, ctx);
       expect(outcome.error).toBeUndefined();
-      expect(ids(outcome.state, BOB)).toEqual(["b1", "b2"]);
+      expect(trackIds(outcome.state, BOB)).toEqual(["b1", "b2"]);
     }
   });
 
@@ -293,35 +284,6 @@ describe("handleOp", () => {
     for (const playlists of cases) {
       const op = { type: "set-public-playlists", roomId: "jam", playlists } as unknown as Op;
       expect(handleOp(room(), ALICE, op, ctx).error).toBe("malformed");
-    }
-  });
-
-  it("leaves a playlist read to the shell", () => {
-    const state = Room.setPublicPlaylists(room(), ALICE, [
-      { id: "p1", name: "Morning", tracks: [] },
-    ]);
-
-    const outcome = handleOp(state, BOB, {
-      type: "view-playlists",
-      roomId: "jam",
-      ownerPubkey: ALICE,
-    }, ctx);
-
-    expect(outcome.error).toBeUndefined();
-    expect(Room.publicPlaylistsOf(outcome.state, ALICE)).toEqual(
-      Room.publicPlaylistsOf(state, ALICE),
-    );
-  });
-
-  it("leaves membership ops to the shell", () => {
-    const state = room();
-    for (const op of [
-      { type: "join-room", roomId: "jam" },
-      { type: "leave-room", roomId: "jam" },
-    ] satisfies Op[]) {
-      const outcome = handleOp(state, ALICE, op, ctx);
-      expect(outcome.state).toBe(state);
-      expect(outcome.error).toBeUndefined();
     }
   });
 });

@@ -6,6 +6,7 @@ import { WebSocket } from "ws";
 
 import { MemoryIdentityStore } from "./identity-store.ts";
 import { startServer, type RunningServer } from "./server.ts";
+import { waitFor } from "./testing.ts";
 
 let running: RunningServer | null = null;
 
@@ -189,12 +190,3 @@ describe("server", () => {
     client.close();
   });
 });
-
-async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("condition never became true");
-}

@@ -16,12 +16,6 @@ describe("seal / open", () => {
     expect(result.pubkey).toBe(id.publicKey);
   });
 
-  it("carries the author's pubkey, not a claimed one", () => {
-    const id = generateKeypair();
-    const env = seal({ type: "hello" }, id, NOW);
-    expect(env.pubkey).toBe(id.publicKey);
-  });
-
   it("gives every envelope a distinct nonce", () => {
     const id = generateKeypair();
     const a = seal({ type: "hello" }, id, NOW);

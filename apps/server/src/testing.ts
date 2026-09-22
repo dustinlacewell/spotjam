@@ -2,9 +2,10 @@
 //
 // Kept in src so the type checker covers it alongside the code it serves.
 
-import { seal, type CanonicalValue, type Envelope, type Keypair } from "@spotjam/protocol";
+import { seal, type CanonicalValue, type Envelope, type Keypair, type QueueItem } from "@spotjam/protocol";
 
 import type { Clock, Rng } from "./ports.ts";
+import type { RoomState } from "./room-state.ts";
 import type { TimerHandle, Timers } from "./room-clock.ts";
 
 /** A clock the test moves by hand. */
@@ -145,3 +146,28 @@ export function repeat(frameJson: string): [string, string] {
 }
 
 export type { Envelope };
+
+const MINUTE = 60_000;
+
+/** A queue item under the id's canonical uri, with a three-minute length. */
+export function track(id: string, durationMs: number = 3 * MINUTE): QueueItem {
+  return { id, uri: `spotify:track:${id}`, trackId: id, durationMs };
+}
+
+/** A member's queue reduced to its ids, for asserting order. */
+export function trackIds(state: RoomState, pubkey: string): string[] {
+  return (state.members.get(pubkey)?.queue ?? []).map((item) => item.id);
+}
+
+/** Poll until the predicate holds, rather than sleeping a guessed interval. */
+export async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("condition never became true");
+}
