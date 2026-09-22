@@ -6,6 +6,7 @@
 
 mod cdp;
 mod launcher;
+mod list_api;
 mod player_api;
 mod playlist_api;
 mod registry;
@@ -13,6 +14,7 @@ mod session;
 mod target;
 mod track_api;
 
+pub use list_api::{StaticListContents, StaticListTrack};
 pub use player_api::{Observation, PlayerState};
 pub use playlist_api::{PlaylistContents, PlaylistError, RowRef};
 pub use session::BridgeState;
@@ -286,6 +288,26 @@ pub async fn spotify_move_in_playlist(
                 client, uri, rows, before_uid, after_uid,
             ))
         })
+        .await
+}
+
+/// Returns the track list behind an album or artist link.
+///
+/// Accepts a `spotify:album:`/`spotify:artist:` URI or an open.spotify.com
+/// URL. The list comes from the signed-in client's list platform service —
+/// the same registry service that serves playlists — with the album's tracks
+/// in album order and the artist's in Spotify's own ordering.
+///
+/// Failures come back typed exactly like the playlist fetch's, and for the
+/// same reason: the caller must be able to tell a link that no longer
+/// resolves from a client it could not reach.
+#[tauri::command]
+pub async fn spotify_fetch_list(
+    bridge: tauri::State<'_, SpotifyBridge>,
+    uri: String,
+) -> Result<StaticListContents, PlaylistError> {
+    bridge
+        .with_client_typed(|client| Box::pin(list_api::fetch_list(client, uri)))
         .await
 }
 

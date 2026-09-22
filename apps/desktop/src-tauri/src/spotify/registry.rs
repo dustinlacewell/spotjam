@@ -93,7 +93,12 @@ pub static REACT_MOUNTED_JS: LazyLock<String> = LazyLock::new(|| {
 
 /// Every `window` key an ensure script writes. One list, so dropping the
 /// stashes cannot fall out of step with creating them.
-pub const STASH_KEYS: [&str; 3] = ["__playerApi", "__playlistApi", "__metadataApi"];
+pub const STASH_KEYS: [&str; 4] = [
+    "__playerApi",
+    "__playlistApi",
+    "__listPlatformApi",
+    "__metadataApi",
+];
 
 /// JS that deletes every stash, so the next command re-resolves.
 ///
@@ -236,6 +241,7 @@ mod tests {
         let sources = [
             include_str!("player_api.rs"),
             include_str!("playlist_api.rs"),
+            include_str!("list_api.rs"),
             include_str!("track_api.rs"),
         ];
         let mut found = Vec::new();

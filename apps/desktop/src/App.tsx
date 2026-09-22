@@ -15,7 +15,7 @@ import { controlState } from "./lib/playback/control";
 import { loadIdentity, type StoredIdentity } from "./lib/identity";
 import { loadSessionPrefs, saveSessionPrefs } from "./lib/session-prefs";
 import { tauriTrackMetadata } from "./lib/track-metadata";
-import { tauriPlaylistService } from "./lib/playlist-import";
+import { tauriListService, tauriPlaylistService } from "./lib/playlist-import";
 import { tauriBridgeState, type BridgeState } from "./lib/bridge-state";
 
 interface Session {
@@ -44,6 +44,7 @@ function useServices(driver: PlaybackDriver | null): RoomServices {
     () => ({
       trackMetadata: tauriTrackMetadata,
       playlistService: tauriPlaylistService,
+      listService: tauriListService,
       playerControl: driver
         ? {
             subscribe: (listener: (control: PlayerControlState) => void) => {

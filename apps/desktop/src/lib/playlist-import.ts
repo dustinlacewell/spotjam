@@ -1,12 +1,16 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import {
   PlaylistFetchError,
+  parseSpotifyAlbumLink,
+  parseSpotifyArtistLink,
   parseSpotifyPlaylistLink,
   type ImportedPlaylist,
+  type ListService,
   type MoveTarget,
   type ParsedTrack,
   type PlaylistRow,
   type PlaylistService,
+  type StaticListTracks,
 } from "@spotjam/room";
 
 /**
@@ -40,6 +44,14 @@ export type { ImportedPlaylist };
 type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
 const TRACK_URI_PREFIX = "spotify:track:";
+
+/** What the Rust `spotify_fetch_list` command returns. */
+export interface FetchedStaticList {
+  tracks: {
+    uri: string;
+    uid?: string;
+  }[];
+}
 
 /**
  * Fetches a Spotify playlist through the Rust side and reduces it to the rows
@@ -148,6 +160,46 @@ export const tauriPlaylistService: PlaylistService = {
   addTracks: (playlistId, tracks) => addTracksToPlaylist(playlistId, tracks),
   removeRows: (playlistId, rows) => removeRowsFromPlaylist(playlistId, rows),
   moveRow: (playlistId, row, target) => moveRowInPlaylist(playlistId, row, target),
+};
+
+/**
+ * Fetches the track list behind an album or artist link, through the Rust
+ * side's list platform path. The tracks arrive as bare references — no names,
+ * no durations — so this reduces them to the parsed shape the enqueue path
+ * already resolves lengths for.
+ *
+ * Rejects with a `PlaylistFetchError` carrying Rust's verdict on why, with
+ * the same failure semantics as the playlist fetch.
+ */
+export async function fetchStaticList(
+  uri: string,
+  invoke: Invoke = tauriInvoke,
+): Promise<StaticListTracks> {
+  const link = parseSpotifyAlbumLink(uri) ?? parseSpotifyArtistLink(uri);
+  if (!link) {
+    throw new PlaylistFetchError("unreachable", `Not a Spotify album or artist link: ${uri}`);
+  }
+
+  let fetched: FetchedStaticList;
+  try {
+    fetched = await invoke<FetchedStaticList>("spotify_fetch_list", { uri: link.uri });
+  } catch (error) {
+    throw toFetchError(error);
+  }
+
+  const tracks: ParsedTrack[] = [];
+  for (const entry of fetched.tracks) {
+    if (!entry.uri.startsWith(TRACK_URI_PREFIX)) continue;
+    const trackId = entry.uri.slice(TRACK_URI_PREFIX.length);
+    if (!trackId) continue;
+    tracks.push({ uri: entry.uri, trackId });
+  }
+  return { tracks };
+}
+
+/** The Tauri-backed list adapter the app hands to @spotjam/room. */
+export const tauriListService: ListService = {
+  fetch: (uri) => fetchStaticList(uri),
 };
 
 /**
