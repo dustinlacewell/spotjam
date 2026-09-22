@@ -43,3 +43,26 @@ looking for an internal image-bytes service; there isn't one. See
 
 `docs/` is a tree that mirrors the architecture. One topic per file.
 `docs/future-work/` holds proposals that are not built.
+
+## Tests — run everything that could have changed, nothing more
+
+The full suite (`pnpm run test` = `pnpm -r test`, every workspace) protects
+review and CI — it is not the default for a single edit. Pick the tier:
+
+- **Iterating on or adding a test:** run that test file (or the suite it
+  lives in) only, e.g.
+  `pnpm --filter @spotjam/desktop exec vitest run src/lib/playback/reconcile.test.ts`
+- **Small patch confined to one package/subsystem:** that package's scoped
+  suite, e.g. `pnpm --filter @spotjam/desktop exec vitest run src/lib/playback`,
+  `pnpm --filter @spotjam/server test`.
+- **Cross-cutting change** (protocol, bridge, shared types): scoped suites for
+  every touched boundary plus its dependents.
+- **Requesting review, or touching CI/build config:** full suite — and CI runs
+  it regardless.
+
+Tests are colocated next to source (`*.test.ts` alongside the module).
+Rust bridge tests are inline `#[cfg(test)]` modules in
+`src-tauri/src/spotify/`; scope with `cargo test <module path>`, e.g.
+`cargo test spotify::playlist_api`.
+
+Build: `pnpm run build`.
