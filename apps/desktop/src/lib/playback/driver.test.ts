@@ -691,6 +691,23 @@ describe("PlaybackDriver", () => {
     driver.stop();
   });
 
+  it("clears the stuck chips when the driver stops", async () => {
+    const { spotify, room, driver } = setup();
+    spotify.unplayable = A;
+    room.pointer = pointerOn(A, Date.now());
+    const seen: string[][] = [];
+    driver.onStuckChange((t) => seen.push(t));
+    driver.start();
+    await run(60_000);
+    expect(seen.at(-1)).toEqual([`play:${A}`]);
+
+    // Stopping ends the run the verdict was reached in: leaving the chip on
+    // would make a stale "Spotify would not take" outlive its own run and sit
+    // there across a restart.
+    driver.stop();
+    expect(seen.at(-1)).toEqual([]);
+  });
+
   it("never replays the old track when Spotify crosses the boundary first", async () => {
     // A short track, so the driver watches every second of it rather than the
     // test jumping the clock past the window the rollover is registered in.

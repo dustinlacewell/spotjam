@@ -133,7 +133,9 @@ export class PlaybackDriver {
     // a gap the stopped run never commanded — the stale-`prev` detach.
     this.forget();
     this.stuck = freshStuck();
-    this.lastStuck = [];
+    // Publish, not silently reset: `lastStuck` sits in the listener contract,
+    // and setting it quietly would leave every chip stale across a restart.
+    this.publishStuck();
     this.lastItemId = null;
   }
 
