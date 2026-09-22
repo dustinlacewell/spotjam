@@ -1,15 +1,15 @@
 ---
 id: "drag-any-static-list-spotify-link-albums-artists-2026-09-21"
-status: "in-progress"
+status: "done"
 priority: "low"
 assignee: null
 epic: null
 dueDate: null
 created: "2026-09-21T02:50:00.000Z"
-modified: "2026-09-21T06:09:13.154Z"
-completedAt: null
+modified: "2026-09-22T01:12:47.167Z"
+completedAt: "2026-09-22T01:12:47.167Z"
 labels: ["feature"]
-order: "a4"
+order: "a100V"
 ---
 # Drag/paste any Spotify link that resolves to a static list — albums, artists, not just tracks and playlists
 

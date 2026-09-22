@@ -3,6 +3,7 @@
 // would otherwise thread them through every layer, so they travel by context.
 
 import { createContext, useContext } from "react";
+import type { ListService } from "./ports/list-service";
 import type { PlaylistService } from "./ports/playlist-service";
 import type { TrackMetadataSource } from "./ports/track-metadata";
 
@@ -26,6 +27,12 @@ export interface PlayerControl {
 export interface RoomServices {
   trackMetadata: TrackMetadataSource;
   playlistService: PlaylistService;
+  /**
+   * Resolves album and artist links into static track lists. Optional because
+   * only a shell that drives the signed-in Spotify client can answer it; a
+   * web shell surfaces album and artist links as unresolvable instead.
+   */
+  listService?: ListService;
   /** How the local player is driven, if this shell drives one at all. Web shells pass nothing. */
   playerControl?: PlayerControl;
 }

@@ -16,7 +16,7 @@ import type { Room } from "../ports/room";
 import type { ImportedPlaylist } from "../ports/playlist-service";
 import { resolvePlaylistTracks, resolveQueueItems } from "../lib/enqueue";
 import { rowsOfTracks, toSharedPlaylists, type PlaylistRow } from "../lib/playlists";
-import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
+import type { ParsedAlbum, ParsedArtist, ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import { useRoomServices } from "../services";
 import { usePlaylists } from "./use-playlists";
 import { PlaylistsProvider } from "./playlists-context";
@@ -54,7 +54,7 @@ export function QueueView({
   const { createWithTracks } = playlistsApi;
   const myPubkey = room.myPubkey;
 
-  const { importStatus, startImports } = usePlaylistImport();
+  const { importStatus, startImports, startListResolution } = usePlaylistImport();
 
   // A playlist link becomes a new playlist, which then takes over the view.
   // Copying takes the tracks and forgets where they came from; linking keeps
@@ -167,6 +167,27 @@ export function QueueView({
   }
 
   /**
+   * Album and artist links resolve the same way a playlist does — through the
+   * signed-in client, into a static track list — and surface as one status
+   * line while they resolve. What happens to the resolved tracks is
+   * deliberately not decided here; see `resolveStaticLists`.
+   */
+  function resolveStaticLists(albums: ParsedAlbum[], artists: ParsedArtist[]) {
+    startListResolution(albums, artists, (resolved) => {
+      // ENQUEUE STUB — deferred ruling. What these tracks do next is queue
+      // semantics, and the duplicate-track decision that governs it
+      // (server-dedupes-tracks-while-client-mints-unique-ids, epic
+      // queue-semantics) has been deferred by the user, not ruled on.
+      // Albums repeat tracks across them and an artist list can hold the
+      // same track several times, so enqueueing without that ruling would
+      // bake in an answer to a question the room has explicitly left open.
+      // When the ruling lands, wire the resolved tracks into the same
+      // per-surface policies the playlist path uses.
+      void resolved;
+    });
+  }
+
+  /**
    * Every drop and paste lands here: the tracks go wherever that surface
    * sends them, and any playlist links resolve through whichever policy that
    * surface passes in — a new local playlist, or straight into the queue.
@@ -178,6 +199,9 @@ export function QueueView({
   ) {
     if (links.tracks.length > 0) onTracks(links.tracks);
     if (links.playlists.length > 0) onPlaylists(links.playlists);
+    if (links.albums.length > 0 || links.artists.length > 0) {
+      resolveStaticLists(links.albums, links.artists);
+    }
   }
 
   return (
@@ -362,6 +386,12 @@ function nameOf(participants: Participant[], pubkey: string | null): string {
 
 const STATUS_LINGER_MS = 4000;
 
+/** One resolved album or artist list, with the kind that produced it. */
+export interface ResolvedList {
+  label: "album" | "artist";
+  tracks: ParsedTrack[];
+}
+
 /**
  * Fetches dropped or pasted playlist links and reports one status line about
  * it. Failures surface as that line — never as a thrown promise — because a
@@ -373,12 +403,20 @@ const STATUS_LINGER_MS = 4000;
  * the queue (enqueue the tracks) can share this one fetch-and-report
  * mechanism, and its one status line, without contending over which meaning
  * is "the" meaning of a dropped playlist link.
+ *
+ * `startListResolution` is the same mechanism for album and artist links,
+ * which resolve to a static track list through the list service.
  */
 function usePlaylistImport(): {
   importStatus: string | null;
   startImports: (playlists: ParsedPlaylist[], onImported: (imported: ImportedPlaylist) => void) => void;
+  startListResolution: (
+    albums: ParsedAlbum[],
+    artists: ParsedArtist[],
+    onResolved: (lists: ResolvedList[]) => void,
+  ) => void;
 } {
-  const { playlistService } = useRoomServices();
+  const { playlistService, listService } = useRoomServices();
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const startImports = useCallback(
@@ -401,6 +439,45 @@ function usePlaylistImport(): {
     [playlistService],
   );
 
+  const startListResolution = useCallback(
+    (albums: ParsedAlbum[], artists: ParsedArtist[], onResolved: (lists: ResolvedList[]) => void) => {
+      if (albums.length === 0 && artists.length === 0) return;
+      if (!listService) {
+        // Album and artist links resolve through the signed-in client, which
+        // only the desktop shell can reach. Say so rather than sit silent.
+        setImportStatus("Album and artist links can't be resolved here — try the desktop app.");
+        return;
+      }
+
+      const pending: { label: "album" | "artist"; uri: string }[] = [
+        ...albums.map((album) => ({ label: "album" as const, uri: album.uri })),
+        ...artists.map((artist) => ({ label: "artist" as const, uri: artist.uri })),
+      ];
+
+      // The link kind is visible before the resolve completes, not after: a
+      // silent wait is what this status line exists to prevent.
+      setImportStatus(`${listLabel(albums.length, artists.length)} — resolving...`);
+
+      void Promise.all(
+        pending.map(async (item) => {
+          const resolved = await listService.fetch(item.uri);
+          return { ...item, tracks: resolved.tracks };
+        }),
+      ).then(
+        (lists) => {
+          const total = lists.reduce((sum, list) => sum + list.tracks.length, 0);
+          setImportStatus(`${listLabel(albums.length, artists.length)} — ${total} tracks resolved.`);
+          onResolved(lists);
+        },
+        (error: unknown) => {
+          const kind = pending.length === 1 ? pending[0].label : "album or artist";
+          setImportStatus(`Couldn't resolve that ${kind} link: ${messageOf(error)}`);
+        },
+      );
+    },
+    [listService],
+  );
+
   // Clear a failure line on its own rather than leaving it up forever.
   useEffect(() => {
     if (!importStatus?.startsWith("Couldn't")) return;
@@ -408,7 +485,23 @@ function usePlaylistImport(): {
     return () => clearTimeout(id);
   }, [importStatus]);
 
-  return { importStatus, startImports };
+  return { importStatus, startImports, startListResolution };
+}
+
+/**
+ * The human name for a set of album and artist links, capitalized for a
+ * status line: "Album", "2 albums and 1 artist".
+ */
+function listLabel(albums: number, artists: number): string {
+  const parts: string[] = [];
+  if (albums === 1) parts.push("album");
+  else if (albums > 1) parts.push(`${albums} albums`);
+  if (artists === 1) parts.push("artist");
+  else if (artists > 1) parts.push(`${artists} artists`);
+  if (parts.length === 1) {
+    return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+  }
+  return parts.join(" and ");
 }
 
 function messageOf(error: unknown): string {

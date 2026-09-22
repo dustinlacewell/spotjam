@@ -75,6 +75,7 @@ export {
   parseSpotifyTrackLink,
   parseSpotifyTrackLinks,
 } from "./lib/spotify-link";
+export type { ListService, StaticListTracks } from "./ports/list-service";
 export type {
   ParsedAlbum,
   ParsedArtist,
