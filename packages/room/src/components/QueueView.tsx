@@ -169,21 +169,14 @@ export function QueueView({
   /**
    * Album and artist links resolve the same way a playlist does — through the
    * signed-in client, into a static track list — and surface as one status
-   * line while they resolve. What happens to the resolved tracks is
-   * deliberately not decided here; see `resolveStaticLists`.
+   * line while they resolve. The resolved tracks join the queue, as a
+   * playlist dropped on the queue does. On the playlist list they join the
+   * queue too: a resolved list carries no name, so it cannot become a
+   * playlist the way a dropped playlist link does there.
    */
   function resolveStaticLists(albums: ParsedAlbum[], artists: ParsedArtist[]) {
     startListResolution(albums, artists, (resolved) => {
-      // ENQUEUE STUB — deferred ruling. What these tracks do next is queue
-      // semantics, and the duplicate-track decision that governs it
-      // (server-dedupes-tracks-while-client-mints-unique-ids, epic
-      // queue-semantics) has been deferred by the user, not ruled on.
-      // Albums repeat tracks across them and an artist list can hold the
-      // same track several times, so enqueueing without that ruling would
-      // bake in an answer to a question the room has explicitly left open.
-      // When the ruling lands, wire the resolved tracks into the same
-      // per-surface policies the playlist path uses.
-      void resolved;
+      appendTracks(resolved.flatMap((list) => list.tracks));
     });
   }
 
