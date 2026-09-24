@@ -176,10 +176,7 @@ impl CdpClient {
         // to settle (the protocol's `timeout` param governs side-effect
         // execution, not the await), so a never-settling promise would leave
         // this future pending forever. Bound the whole round trip here.
-        let response = tokio::time::timeout(EVALUATE_TIMEOUT, rx)
-            .await
-            .map_err(|_| anyhow!("CDP evaluate timed out after {}s", EVALUATE_TIMEOUT.as_secs()))?
-            .map_err(|_| anyhow!("CDP connection closed before response"))?;
+        let response = await_response(&self.pending, id, rx, EVALUATE_TIMEOUT).await?;
 
         if let Some(error) = response.get("error") {
             return Err(anyhow!("CDP protocol error: {error}"));
@@ -207,9 +204,44 @@ impl CdpClient {
     }
 }
 
+/// Wait up to `limit` for the response to request `id`.
+///
+/// On timeout the waiter is removed: a promise that never settles never
+/// gets a response, so nothing else would ever take the sender out of the
+/// map, and it would leak for the client's lifetime.
+async fn await_response(
+    pending: &Mutex<Pending>,
+    id: u64,
+    rx: oneshot::Receiver<Value>,
+    limit: std::time::Duration,
+) -> Result<Value> {
+    match tokio::time::timeout(limit, rx).await {
+        Ok(response) => response.map_err(|_| anyhow!("CDP connection closed before response")),
+        Err(_) => {
+            pending.lock().await.waiters.remove(&id);
+            Err(anyhow!("CDP evaluate timed out after {}s", limit.as_secs()))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A request whose response never arrives times out, and its waiter
+    /// leaves the map with it rather than leaking for the client's lifetime.
+    #[tokio::test]
+    async fn a_timed_out_request_removes_its_waiter() {
+        let pending = Mutex::new(Pending::default());
+        let (tx, rx) = oneshot::channel::<Value>();
+        pending.lock().await.waiters.insert(7, tx);
+
+        let result =
+            await_response(&pending, 7, rx, std::time::Duration::from_millis(10)).await;
+
+        assert!(result.is_err());
+        assert!(pending.lock().await.waiters.is_empty());
+    }
 
     /// The reader marks itself done and sweeps the waiters under one lock. A
     /// request that arrives after that must be refused, not parked: the task
