@@ -57,8 +57,8 @@ review and CI — it is not the default for a single edit. Pick the tier:
   `pnpm --filter @spotjam/server test`.
 - **Cross-cutting change** (protocol, bridge, shared types): scoped suites for
   every touched boundary plus its dependents.
-- **Requesting review, or touching CI/build config:** full suite — and CI runs
-  it regardless.
+- **Requesting review, or touching CI/build config:** full suite. Nothing in
+  CI runs the tests today — run the full suite yourself before a release.
 
 Tests are colocated next to source (`*.test.ts` alongside the module).
 Rust bridge tests are inline `#[cfg(test)]` modules in

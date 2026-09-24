@@ -76,5 +76,6 @@ The site deploys via GitHub Actions on push.
 ## Nix
 
 `shell.nix` at the repo root pins the toolchain (it is the canonical
-dependency list); with nix + direnv you get it automatically, otherwise
-replicate the listed deps.
+dependency list). With nix + direnv, create an `.envrc` file containing
+`use nix` (it is gitignored, so this is a one-time local step) and run
+`direnv allow`. Without direnv, replicate the listed deps.
