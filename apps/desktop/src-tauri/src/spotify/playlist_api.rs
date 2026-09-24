@@ -95,7 +95,7 @@ pub enum PlaylistError {
 }
 
 impl PlaylistError {
-    fn unreachable(message: impl std::fmt::Display) -> Self {
+    pub(super) fn unreachable(message: impl std::fmt::Display) -> Self {
         Self::Unreachable {
             message: message.to_string(),
         }
@@ -534,11 +534,13 @@ fn normalise_playlist_uri(input: &str) -> Result<String> {
     Err(anyhow!("not a Spotify playlist URI or URL: {trimmed}"))
 }
 
-fn validated_id(id: &str) -> Result<&str> {
+/// A Spotify base-62 id: non-empty and ASCII alphanumeric. Shared by every
+/// link parser in the bridge.
+pub(super) fn validated_id(id: &str) -> Result<&str> {
     if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) {
         Ok(id)
     } else {
-        Err(anyhow!("invalid Spotify playlist id: {id:?}"))
+        Err(anyhow!("invalid Spotify id: {id:?}"))
     }
 }
 

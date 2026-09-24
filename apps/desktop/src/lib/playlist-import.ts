@@ -47,10 +47,7 @@ const TRACK_URI_PREFIX = "spotify:track:";
 
 /** What the Rust `spotify_fetch_list` command returns. */
 export interface FetchedStaticList {
-  tracks: {
-    uri: string;
-    uid?: string;
-  }[];
+  tracks: { uri: string }[];
 }
 
 /**

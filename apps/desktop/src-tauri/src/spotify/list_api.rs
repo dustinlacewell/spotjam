@@ -1,19 +1,10 @@
 use super::cdp::CdpClient;
-use super::playlist_api::PlaylistError;
+use super::playlist_api::{validated_id, PlaylistError};
 use super::registry::ensure_script;
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::LazyLock;
 use std::time::Duration;
-
-/// Builds the `Unreachable` verdict directly: `PlaylistError`'s private
-/// constructors belong to the playlist module, but the variants are public
-/// and the failure semantics are shared.
-fn unreachable(message: impl std::fmt::Display) -> PlaylistError {
-    PlaylistError::Unreachable {
-        message: message.to_string(),
-    }
-}
 
 /// How long a single list fetch may take before it reads as unreachable.
 ///
@@ -57,9 +48,6 @@ static ENSURE_LIST_API_JS: LazyLock<String> = LazyLock::new(|| {
 #[serde(rename_all = "camelCase")]
 pub struct StaticListTrack {
     pub uri: String,
-    /// The client's identity for this row in this list. A static list is
-    /// read-only for us, so this is carried for completeness only.
-    pub uid: String,
 }
 
 /// A static track list as the client's list service reports it.
@@ -91,7 +79,7 @@ pub async fn fetch_list(
 ) -> std::result::Result<StaticListContents, PlaylistError> {
     match tokio::time::timeout(FETCH_TIMEOUT, fetch_inner(cdp, uri)).await {
         Ok(result) => result,
-        Err(_) => Err(unreachable(
+        Err(_) => Err(PlaylistError::unreachable(
             "timed out waiting for Spotify to return the track list",
         )),
     }
@@ -106,9 +94,9 @@ async fn fetch_inner(
     let list_uri = normalise_list_uri(&uri).map_err(PlaylistError::rejected)?;
     cdp.evaluate(&ENSURE_LIST_API_JS)
         .await
-        .map_err(unreachable)?;
+        .map_err(PlaylistError::unreachable)?;
 
-    let uri_json = serde_json::to_string(&list_uri).map_err(unreachable)?;
+    let uri_json = serde_json::to_string(&list_uri).map_err(PlaylistError::unreachable)?;
 
     // The page catches its own rejection and reports it as data, so
     // "this list is gone" is distinguishable from "the call broke" without
@@ -120,10 +108,7 @@ async fn fetch_inner(
                 const tracks = (r?.data ?? [])
                     .filter((item) => typeof item?.uri === "string"
                         && item.uri.startsWith("spotify:track:"))
-                    .map((item) => ({{
-                        uri: item.uri,
-                        uid: item.uid ?? "",
-                    }}));
+                    .map((item) => ({{ uri: item.uri }}));
                 return JSON.stringify({{ ok: true, tracks }});
             }} catch (e) {{
                 return JSON.stringify({{
@@ -134,13 +119,13 @@ async fn fetch_inner(
         }})()"#
     );
 
-    let value: Value = cdp.evaluate(&expr).await.map_err(unreachable)?;
+    let value: Value = cdp.evaluate(&expr).await.map_err(PlaylistError::unreachable)?;
     let json_str = value.as_str().ok_or_else(|| {
-        unreachable(format!(
+        PlaylistError::unreachable(format!(
             "getListContents did not return a JSON string: {value}"
         ))
     })?;
-    let parsed: Value = serde_json::from_str(json_str).map_err(unreachable)?;
+    let parsed: Value = serde_json::from_str(json_str).map_err(PlaylistError::unreachable)?;
 
     parse_fetch_result(&parsed)
 }
@@ -172,18 +157,13 @@ fn classify_js_failure(message: &str) -> PlaylistError {
             message: message.to_string(),
         }
     } else {
-        unreachable(message)
+        PlaylistError::unreachable(message)
     }
 }
 
 fn track_from_json(item: &Value) -> Option<StaticListTrack> {
     Some(StaticListTrack {
         uri: item.get("uri").and_then(Value::as_str)?.to_string(),
-        uid: item
-            .get("uid")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
     })
 }
 
@@ -209,14 +189,6 @@ fn normalise_list_uri(input: &str) -> anyhow::Result<String> {
     Err(anyhow::anyhow!(
         "not a Spotify album or artist URI or URL: {trimmed}"
     ))
-}
-
-fn validated_id(id: &str) -> anyhow::Result<&str> {
-    if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) {
-        Ok(id)
-    } else {
-        Err(anyhow::anyhow!("invalid Spotify list id: {id:?}"))
-    }
 }
 
 #[cfg(test)]
@@ -344,8 +316,7 @@ mod tests {
         let contents = parse_fetch_result(&value).unwrap();
         assert_eq!(contents.tracks.len(), 2);
         assert_eq!(contents.tracks[0].uri, "spotify:track:aaaa1111");
-        assert_eq!(contents.tracks[0].uid, "abc123");
-        assert_eq!(contents.tracks[1].uid, "");
+        assert_eq!(contents.tracks[1].uri, "spotify:track:bbbb2222");
     }
 
     /// The non-track filter lives in the page-side script; the parser's job is
