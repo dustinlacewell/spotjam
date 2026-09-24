@@ -12,7 +12,7 @@ import {
   USERNAME_MIN,
   type Keypair,
 } from "@spotjam/protocol";
-import { IdentityClient, envelopeFrom, signingBody } from "./identity";
+import { IdentityClient, signingBody } from "./identity";
 
 const EPOCH = 1_700_000_000_000;
 
