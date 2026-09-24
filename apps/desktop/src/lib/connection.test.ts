@@ -296,4 +296,60 @@ describe("Handshake send failures", () => {
     expect(connection.isReady()).toBe(false);
     connection.destroy();
   });
+
+  it("grows the backoff across repeated handshake failures and resets it on registration", async () => {
+    const keypair = generateKeypair();
+    const sockets: FakeSocket[] = [];
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    const delays: number[] = [];
+    // The signer fails until the test lets it work.
+    let signerWorks = false;
+    const identity = new IdentityClient(async (cmd, args) => {
+      if (cmd !== "identity_sign") throw new Error(`unexpected command ${cmd}`);
+      if (!signerWorks) throw new Error("signer unavailable");
+      return signBytes(fromHex(args?.messageHex as string), keypair.secretKey);
+    });
+    const connection = new Connection(
+      { publicKey: keypair.publicKey, username: "alice" },
+      {
+        url: "wss://test.invalid",
+        identity,
+        socketFactory: () => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+        setTimer: (fn, ms) => {
+          timers.push({ fn, ms });
+          delays.push(ms);
+          return timers.length as unknown as ReturnType<typeof setTimeout>;
+        },
+        clearTimer: () => {},
+        now: () => 1_700_000_000_000,
+      },
+    );
+    const latest = () => sockets[sockets.length - 1] as FakeSocket;
+    const runTimer = () => timers.shift()?.fn();
+
+    // Each socket opens, then its greeting fails to sign. An open socket is
+    // not a healthy connection, so the delay must keep growing.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      latest().open();
+      await settle();
+      runTimer();
+    }
+    expect(delays).toHaveLength(3);
+    expect(delays[1]).toBeGreaterThan(delays[0] as number);
+    expect(delays[2]).toBeGreaterThan(delays[1] as number);
+
+    // The signer recovers and the server confirms the session.
+    signerWorks = true;
+    await greet(latest(), keypair.publicKey);
+    expect(connection.isReady()).toBe(true);
+
+    // The next drop retries at the first, shortest delay again.
+    latest().drop();
+    expect(delays.at(-1)).toBe(delays[0]);
+    connection.destroy();
+  });
 });

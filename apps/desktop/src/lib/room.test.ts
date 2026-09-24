@@ -835,14 +835,14 @@ describe("RoomClient reconnect", () => {
     harness.room.destroy();
   });
 
-  it("resets the backoff after a connection succeeds", async () => {
+  it("resets the backoff once registration completes", async () => {
     const harness = makeRoom();
     await greet(harness.latest(), harness.keypair.publicKey);
 
     harness.latest().drop();
     harness.runTimer();
-    harness.latest().open(); // a good connection resets the schedule
-    await settle();
+    // A completed handshake, not a bare socket open, resets the schedule.
+    await greet(harness.latest(), harness.keypair.publicKey);
     harness.latest().drop();
 
     expect(harness.timers[0].ms).toBe(500);

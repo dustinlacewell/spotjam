@@ -151,7 +151,9 @@ export class Connection {
    */
   #onOpen(generation: number): void {
     if (generation !== this.#generation) return;
-    this.#reconnectAttempt = 0;
+    // The backoff counter is not reset here: an open socket whose handshake
+    // then fails is no healthier than one that never opened. Only a completed
+    // handshake (see #advanceHandshake) earns the fast retry again.
     this.#handshake = "greeting";
     this.#setStatus({ socket: "connected", synced: this.#status.synced });
     // The handshake has four steps across two processes and a network. Without
@@ -178,6 +180,7 @@ export class Connection {
 
     if (event.type === "registered") {
       this.#handshake = "done";
+      this.#reconnectAttempt = 0;
       console.info("spotjam: registered");
       for (const listener of this.#readyListeners) listener();
       return;
