@@ -14,8 +14,10 @@
 // estimate is the *maximum* sample still in the window: the largest sample is
 // the one with the least latency in front of it, the same selection NTP makes
 // by taking the minimum round trip. Late frames raise the estimate no higher
-// than the truth; a clock correction shows up as a new larger sample and is
-// adopted immediately.
+// than the truth. A correction that raises the offset shows up as a new larger
+// sample and is adopted immediately. A correction that lowers it is not: the
+// older, larger samples still hold the maximum until they age out of the
+// window, so the estimate falls only once the window rolls past them.
 //
 // Pure. No clock is read here; the shell passes `localNow` in.
 

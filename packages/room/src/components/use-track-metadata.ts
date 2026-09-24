@@ -5,8 +5,10 @@ import type { TrackInfo } from "../ports/track-metadata";
 /**
  * The metadata resolver reaches the Spotify client over CDP, and that client
  * goes away whenever Spotify restarts or is closed — exactly while a room can
- * be on screen. A rejection is a normal dip, not a crash: leave whatever the
- * hook already holds in place and stay quiet about it.
+ * be on screen. A rejection is a normal dip, not a crash: log a warning and
+ * change nothing. `useTrackMetadata` clears to null before each lookup, so a
+ * failed lookup leaves it at null; `useTrackMetadataMap` keeps the entries it
+ * already holds and simply lacks the failed one.
  */
 function ignoreResolutionFailure(error: unknown): void {
   console.warn("spotjam: could not resolve track metadata", error);

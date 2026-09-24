@@ -394,12 +394,12 @@ describe("shared playlists", () => {
     expect(peerPlaylistsOf(alone, ME)).toEqual([EVENING]);
   });
 
-  it("keeps the cached playlists unchanged when everyone is still present", () => {
+  it("keeps the cache object identical when everyone is still present", () => {
     let view = viewOf(snapshot());
     view = reduce(view, playlistsEvent(THEM, [MORNING]), EPOCH);
 
     const next = reduce(view, { type: "room-state", snapshot: snapshot() }, EPOCH);
-    expect(peerPlaylistsOf(next, THEM)).toEqual(peerPlaylistsOf(view, THEM));
+    expect(next.peerPlaylists).toBe(view.peerPlaylists);
   });
 });
 
