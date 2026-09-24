@@ -14,7 +14,7 @@ mod session;
 mod target;
 mod track_api;
 
-pub use list_api::{StaticListContents, StaticListTrack};
+pub use list_api::StaticListContents;
 pub use player_api::{Observation, PlayerState};
 pub use playlist_api::{PlaylistContents, PlaylistError, RowRef};
 pub use session::BridgeState;
@@ -92,6 +92,13 @@ impl SpotifyBridge {
         self.session
             .with_client_typed(f, PlaylistError::unreachable_from, PlaylistError::describe)
             .await
+    }
+
+    /// Runs one `set_next_track` operation inside `set_next_track_gate`, so a
+    /// second call waits for the first instead of interleaving with it.
+    async fn gated_set_next_track<T>(&self, op: impl std::future::Future<Output = T>) -> T {
+        let _gate = self.set_next_track_gate.lock().await;
+        op.await
     }
 }
 
@@ -203,9 +210,10 @@ pub async fn spotify_set_next_track(
     bridge: tauri::State<'_, SpotifyBridge>,
     uri: String,
 ) -> Result<(), String> {
-    let _gate = bridge.set_next_track_gate.lock().await;
     bridge
-        .with_client(|client| Box::pin(player_api::set_next_track(client, uri)))
+        .gated_set_next_track(
+            bridge.with_client(|client| Box::pin(player_api::set_next_track(client, uri))),
+        )
         .await
 }
 
@@ -330,27 +338,30 @@ mod tests {
 
     /// Two concurrent `set_next_track` invocations must not interleave: the
     /// clear-then-add sequence of the second must not run inside the first's.
-    /// The gate is what enforces that, so the test drives it directly and
-    /// counts how many "calls" are ever inside the protected section at once.
+    /// The test runs a fake operation through the same gated section the
+    /// command uses and counts how many are ever inside it at once.
     #[tokio::test(start_paused = true)]
     async fn concurrent_set_next_track_calls_do_not_overlap() {
-        let gate = Arc::new(Mutex::new(()));
+        let bridge = SpotifyBridge::new();
         let inside = Arc::new(AtomicUsize::new(0));
         let max_inside = Arc::new(AtomicUsize::new(0));
 
         let mut callers = Vec::new();
         for _ in 0..2 {
-            let gate = gate.clone();
+            let bridge = bridge.clone();
             let inside = inside.clone();
             let max_inside = max_inside.clone();
             callers.push(tokio::spawn(async move {
-                let _guard = gate.lock().await;
-                let now = inside.fetch_add(1, Ordering::SeqCst) + 1;
-                max_inside.fetch_max(now, Ordering::SeqCst);
-                // The page round trips yield: a serialized caller never sees
-                // another inside the section while it awaits.
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                inside.fetch_sub(1, Ordering::SeqCst);
+                bridge
+                    .gated_set_next_track(async {
+                        let now = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_inside.fetch_max(now, Ordering::SeqCst);
+                        // The page round trips yield: a serialized caller
+                        // never sees another inside the section while it awaits.
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        inside.fetch_sub(1, Ordering::SeqCst);
+                    })
+                    .await
             }));
         }
         for caller in callers {
