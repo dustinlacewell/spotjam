@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "lucide-react";
 import { Button, ListRow, TextField } from "@spotjam/ui";
 import { isEditable, type Playlist } from "../lib/playlists";
-import type { ParsedPlaylist } from "../lib/spotify-link";
+import type { ParsedLinks } from "../lib/spotify-link";
 import { TrackDropZone } from "./TrackDropZone";
 import { QUEUE_PANE, type PaneSelection } from "./pane-selection";
 import styles from "./PlaylistsPanel.module.css";
@@ -20,7 +20,7 @@ export function PlaylistList({
   onCancelRename,
   onCreate,
   onLinkPlaylist,
-  onImportPlaylists,
+  onLinks,
 }: {
   playlists: Playlist[];
   /** Track count for the pinned queue row. */
@@ -38,8 +38,8 @@ export function PlaylistList({
   onCreate: () => void;
   /** Opens the dialog that links a Spotify playlist. */
   onLinkPlaylist: () => void;
-  /** A playlist link dropped anywhere on this list asks whether to copy or link it. */
-  onImportPlaylists: (playlists: ParsedPlaylist[]) => void;
+  /** Links dropped anywhere on this list. The caller decides what each kind becomes. */
+  onLinks: (links: ParsedLinks) => void;
 }) {
   const listBody = (
     <>
@@ -110,9 +110,7 @@ export function PlaylistList({
   return (
     <TrackDropZone
       className={`${styles.listColumn} ${styles.dropZone}`}
-      onLinks={(links) => {
-        if (links.playlists.length > 0) onImportPlaylists(links.playlists);
-      }}
+      onLinks={onLinks}
     >
       {listBody}
     </TrackDropZone>

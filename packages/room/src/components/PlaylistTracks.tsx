@@ -5,7 +5,7 @@ import type { QueueItem } from "@spotjam/protocol";
 import type { ParsedLinks } from "../lib/spotify-link";
 import type { Playlist, PlaylistRow } from "../lib/playlists";
 import type { SyncState } from "./use-playlists";
-import { parseSpotifyLinks } from "../lib/spotify-link";
+import { hasLinks, parseSpotifyLinks } from "../lib/spotify-link";
 import { INTERNAL_DRAG_MIME, carriesTracks, linksFromDrop } from "../lib/drop-links";
 import { tracksOf } from "../lib/selection";
 import { matchesTrack } from "../lib/track-search";
@@ -131,7 +131,7 @@ export function PlaylistTracks({
     const beforeTrackId = beforeTrackIdAt(overGap);
     resetDrag();
     const links = linksFromDrop(e.dataTransfer);
-    if (links.tracks.length > 0 || links.playlists.length > 0) onLinks(links, beforeTrackId);
+    if (hasLinks(links)) onLinks(links, beforeTrackId);
   }
 
   /** True while a drag this list can act on is in progress. */
@@ -334,8 +334,8 @@ export function PlaylistTracks({
           status={importStatus}
           onAdd={(text) => {
             const links = parseSpotifyLinks(text);
-            if (links.tracks.length === 0 && links.playlists.length === 0) {
-              return "That doesn't look like a Spotify track or playlist link.";
+            if (!hasLinks(links)) {
+              return "That doesn't look like a Spotify link.";
             }
             onLinks(links, null);
             return null;

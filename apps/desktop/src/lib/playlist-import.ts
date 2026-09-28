@@ -10,7 +10,7 @@ import {
   type ParsedTrack,
   type PlaylistRow,
   type PlaylistService,
-  type StaticListTracks,
+  type StaticList,
 } from "@spotjam/room";
 
 /**
@@ -47,6 +47,7 @@ const TRACK_URI_PREFIX = "spotify:track:";
 
 /** What the Rust `spotify_fetch_list` command returns. */
 export interface FetchedStaticList {
+  name: string | null;
   tracks: { uri: string }[];
 }
 
@@ -160,10 +161,10 @@ export const tauriPlaylistService: PlaylistService = {
 };
 
 /**
- * Fetches the track list behind an album or artist link, through the Rust
- * side's list platform path. The tracks arrive as bare references — no names,
- * no durations — so this reduces them to the parsed shape the enqueue path
- * already resolves lengths for.
+ * Fetches the track list behind an album or artist link, and its name,
+ * through the Rust side's list platform path. The tracks arrive as bare
+ * references — no durations — so this reduces them to the parsed shape the
+ * enqueue path already resolves lengths for.
  *
  * Rejects with a `PlaylistFetchError` carrying Rust's verdict on why, with
  * the same failure semantics as the playlist fetch.
@@ -171,7 +172,7 @@ export const tauriPlaylistService: PlaylistService = {
 export async function fetchStaticList(
   uri: string,
   invoke: Invoke = tauriInvoke,
-): Promise<StaticListTracks> {
+): Promise<StaticList> {
   const link = parseSpotifyAlbumLink(uri) ?? parseSpotifyArtistLink(uri);
   if (!link) {
     throw new PlaylistFetchError("unreachable", `Not a Spotify album or artist link: ${uri}`);
@@ -191,7 +192,7 @@ export async function fetchStaticList(
     if (!trackId) continue;
     tracks.push({ uri: entry.uri, trackId });
   }
-  return { tracks };
+  return { name: fetched.name ?? null, tracks };
 }
 
 /** The Tauri-backed list adapter the app hands to @spotjam/room. */

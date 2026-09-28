@@ -8,11 +8,13 @@ import type { ParsedTrack } from "../lib/spotify-link";
 /**
  * A link that resolves to a static track list, as it arrives from outside.
  *
- * Album and artist lists carry no names and no per-row durations — the client
- * serves bare `spotify:track:` references — so the enqueue path resolves
- * durations the same way it does for track links.
+ * The rows carry no durations — the client serves bare `spotify:track:`
+ * references — so the enqueue path resolves durations the same way it does
+ * for track links.
  */
-export interface StaticListTracks {
+export interface StaticList {
+  /** The album or artist name. Null when the lookup failed. */
+  name: string | null;
   tracks: ParsedTrack[];
 }
 
@@ -23,5 +25,5 @@ export interface ListService {
    * failure semantics are shared — `gone` means Spotify answered and the link
    * no longer resolves, and every other failure is `unreachable`.
    */
-  fetch(uri: string): Promise<StaticListTracks>;
+  fetch(uri: string): Promise<StaticList>;
 }

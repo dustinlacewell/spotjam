@@ -1,4 +1,5 @@
 use super::cdp::CdpClient;
+use super::list_name;
 use super::playlist_api::{validated_id, PlaylistError};
 use super::registry::ensure_script;
 use serde::Serialize;
@@ -50,15 +51,17 @@ pub struct StaticListTrack {
     pub uri: String,
 }
 
-/// A static track list as the client's list service reports it.
+/// A static track list as the client's list service reports it, with the
+/// album or artist name the metadata service reports for it.
 ///
-/// Album and artist lists carry no display names and no per-row durations —
-/// the rows are bare `spotify:track:` references — so neither is produced
-/// here. Durations are resolved later by the same metadata lookup the
-/// playlist enqueue path already runs.
+/// The rows are bare `spotify:track:` references with no durations.
+/// Durations are resolved later by the same metadata lookup the playlist
+/// enqueue path already runs.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StaticListContents {
+    /// `None` when the name lookup failed: the tracks are still good.
+    pub name: Option<String>,
     pub tracks: Vec<StaticListTrack>,
 }
 
@@ -126,8 +129,12 @@ async fn fetch_inner(
         ))
     })?;
     let parsed: Value = serde_json::from_str(json_str).map_err(PlaylistError::unreachable)?;
+    let contents = parse_fetch_result(&parsed)?;
 
-    parse_fetch_result(&parsed)
+    // A missing name must not cost the user the tracks. The caller falls back
+    // to a default name.
+    let name = list_name::fetch_list_name(cdp, &list_uri).await.ok().flatten();
+    Ok(StaticListContents { name, ..contents })
 }
 
 /// Turns the page's reported result into contents or a classified failure.
@@ -144,7 +151,7 @@ fn parse_fetch_result(
         .map(|items| items.iter().filter_map(track_from_json).collect())
         .unwrap_or_default();
 
-    Ok(StaticListContents { tracks })
+    Ok(StaticListContents { name: None, tracks })
 }
 
 /// Only the client's own "no such list" rejection counts as gone, matched on

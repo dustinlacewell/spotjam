@@ -7,6 +7,7 @@
 mod cdp;
 mod launcher;
 mod list_api;
+mod list_name;
 mod player_api;
 mod playlist_api;
 mod registry;

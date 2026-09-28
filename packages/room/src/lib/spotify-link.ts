@@ -190,3 +190,13 @@ export function parseSpotifyLinks(text: string): ParsedLinks {
 
   return { tracks, playlists, albums, artists };
 }
+
+/** True when the text held at least one link of any kind we accept. */
+export function hasLinks(links: ParsedLinks): boolean {
+  return (
+    links.tracks.length > 0 ||
+    links.playlists.length > 0 ||
+    links.albums.length > 0 ||
+    links.artists.length > 0
+  );
+}

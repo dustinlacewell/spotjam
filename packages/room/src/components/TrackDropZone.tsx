@@ -1,10 +1,10 @@
 import { useRef, useState } from "react";
-import type { ParsedLinks } from "../lib/spotify-link";
+import { hasLinks, type ParsedLinks } from "../lib/spotify-link";
 import { carriesTracks, linksFromDrop } from "../lib/drop-links";
 import styles from "./TrackDropZone.module.css";
 
 /**
- * Accepts Spotify tracks and playlists dragged in from outside the app (the
+ * Accepts Spotify links of any kind dragged in from outside the app (the
  * desktop client carries share URLs in text/uri-list and text/plain). In-app
  * reorder drags carry INTERNAL_DRAG_MIME and pass straight through.
  */
@@ -51,7 +51,7 @@ export function TrackDropZone({
         e.preventDefault();
         reset();
         const links = linksFromDrop(e.dataTransfer);
-        if (links.tracks.length > 0 || links.playlists.length > 0) onLinks(links);
+        if (hasLinks(links)) onLinks(links);
       }}
     >
       {children}

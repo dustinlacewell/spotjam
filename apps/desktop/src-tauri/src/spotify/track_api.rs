@@ -38,7 +38,7 @@ static ENSURE_METADATA_API_JS: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-async fn ensure_metadata_api(cdp: &CdpClient) -> Result<()> {
+pub(super) async fn ensure_metadata_api(cdp: &CdpClient) -> Result<()> {
     cdp.evaluate(&ENSURE_METADATA_API_JS).await?;
     Ok(())
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  hasLinks,
   parseSpotifyAlbumLink,
   parseSpotifyArtistLink,
   parseSpotifyLinks,
@@ -212,5 +213,24 @@ describe("parseSpotifyLinks", () => {
       albums: [],
       artists: [],
     });
+  });
+});
+
+describe("hasLinks", () => {
+  it("is false for junk", () => {
+    expect(hasLinks(parseSpotifyLinks("nothing to see here"))).toBe(false);
+  });
+
+  it("is true for a paste that holds only an album", () => {
+    expect(hasLinks(parseSpotifyLinks(ALBUM_URL))).toBe(true);
+  });
+
+  it("is true for a paste that holds only an artist", () => {
+    expect(hasLinks(parseSpotifyLinks(ARTIST_URL))).toBe(true);
+  });
+
+  it("is true for tracks and for playlists", () => {
+    expect(hasLinks(parseSpotifyLinks(LINK_A))).toBe(true);
+    expect(hasLinks(parseSpotifyLinks(PLAYLIST_URL))).toBe(true);
   });
 });

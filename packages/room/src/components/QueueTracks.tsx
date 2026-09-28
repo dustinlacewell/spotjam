@@ -2,7 +2,7 @@ import { useState } from "react";
 import { HintLine, Pill, TextField } from "@spotjam/ui";
 import type { QueueItem, SessionEntry, SharedPlaylist } from "@spotjam/protocol";
 import type { ParsedLinks } from "../lib/spotify-link";
-import { parseSpotifyLinks } from "../lib/spotify-link";
+import { hasLinks, parseSpotifyLinks } from "../lib/spotify-link";
 import { AddTrackBar } from "./AddTrackBar";
 import { MyQueueList } from "./MyQueueList";
 import { SessionQueueList } from "./SessionQueueList";
@@ -88,8 +88,8 @@ export function QueueTracks({
           status={importStatus}
           onAdd={(text) => {
             const links = parseSpotifyLinks(text);
-            if (links.tracks.length === 0 && links.playlists.length === 0) {
-              return "That doesn't look like a Spotify track or playlist link.";
+            if (!hasLinks(links)) {
+              return "That doesn't look like a Spotify link.";
             }
             onLinks(links);
             return null;

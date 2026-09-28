@@ -15,7 +15,7 @@ import type { ConnectionStatus } from "../lib/room-client";
 import type { Room } from "../ports/room";
 import type { ImportedPlaylist } from "../ports/playlist-service";
 import { resolvePlaylistTracks, resolveQueueItems } from "../lib/enqueue";
-import { rowsOfTracks, toSharedPlaylists, type PlaylistRow } from "../lib/playlists";
+import { defaultPlaylistName, rowsOfTracks, toSharedPlaylists, type PlaylistRow } from "../lib/playlists";
 import type { ParsedAlbum, ParsedArtist, ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
 import { useRoomServices } from "../services";
 import { usePlaylists } from "./use-playlists";
@@ -167,35 +167,44 @@ export function QueueView({
     startImports(playlists, (imported) => appendTracks(tracksOfRows(imported.rows)));
   }
 
+  /** Resolved album and artist lists dropped on the queue join it, as a playlist does there. */
+  function queueLists(lists: ResolvedList[]) {
+    appendTracks(lists.flatMap((list) => list.tracks));
+  }
+
   /**
-   * Album and artist links resolve the same way a playlist does — through the
-   * signed-in client, into a static track list — and surface as one status
-   * line while they resolve. The resolved tracks join the queue, as a
-   * playlist dropped on the queue does. On the playlist list they join the
-   * queue too: a resolved list carries no name, so it cannot become a
-   * playlist the way a dropped playlist link does there.
+   * Resolved album and artist lists dropped on the playlist list each become a
+   * new playlist named after the album or artist, which then takes over the
+   * view. A list whose name did not resolve takes the next free default name.
+   * The names are all picked up front: the playlists land one by one, after
+   * their lengths resolve.
    */
-  function resolveStaticLists(albums: ParsedAlbum[], artists: ParsedArtist[]) {
-    startListResolution(albums, artists, (resolved) => {
-      appendTracks(resolved.flatMap((list) => list.tracks));
-    });
+  function listsAsNewPlaylists(lists: ResolvedList[]) {
+    const taken = playlistsApi.playlists.map((p) => p.name);
+    for (const list of lists) {
+      const name = list.name ?? defaultPlaylistName(taken);
+      taken.push(name);
+      void resolvePlaylistTracks(trackMetadata, list.tracks).then((tracks) =>
+        openImported(createWithTracks(name, rowsOfTracks(tracks))),
+      );
+    }
   }
 
   /**
    * Every drop and paste lands here: the tracks go wherever that surface
-   * sends them, and any playlist links resolve through whichever policy that
-   * surface passes in — a new local playlist, or straight into the queue.
+   * sends them, and playlist, album and artist links resolve through
+   * whichever policy that surface passes in — a new local playlist, or
+   * straight into the queue.
    */
   function handleLinks(
     links: ParsedLinks,
     onTracks: (tracks: ParsedTrack[]) => void,
     onPlaylists: (playlists: ParsedPlaylist[]) => void,
+    onLists: (lists: ResolvedList[]) => void,
   ) {
     if (links.tracks.length > 0) onTracks(links.tracks);
     if (links.playlists.length > 0) onPlaylists(links.playlists);
-    if (links.albums.length > 0 || links.artists.length > 0) {
-      resolveStaticLists(links.albums, links.artists);
-    }
+    startListResolution(links.albums, links.artists, onLists);
   }
 
   return (
@@ -255,7 +264,7 @@ export function QueueView({
               <QueueTracks
                 source={queueSource}
                 importStatus={importStatus}
-                onLinks={(links) => handleLinks(links, appendTracks, importIntoQueue)}
+                onLinks={(links) => handleLinks(links, appendTracks, importIntoQueue, queueLists)}
                 onMoveMany={(itemIds, beforeItemId) => room.moveManyInMyQueue(itemIds, beforeItemId)}
                 onSendToTop={(itemId) => room.sendToTopOfMyQueue(itemId)}
                 onRemove={(itemId) => room.removeFromMyQueue(itemId)}
@@ -271,20 +280,23 @@ export function QueueView({
               onSelect={setPane}
               onAddToQueue={appendTracks}
               onReplaceQueue={replaceTracks}
-              onQueueLinks={(links) => handleLinks(links, appendTracks, importIntoQueue)}
-              onLinks={(links, onTracks) =>
-                handleLinks(
-                  links,
-                  // A link dropped into a playlist carries no length either,
-                  // and a playlist is a place tracks get queued from — so the
-                  // same lookup runs here before the rows are made.
-                  (tracks) =>
-                    void resolvePlaylistTracks(trackMetadata, tracks).then(onTracks),
-                  setPendingImport,
-                )
-              }
+              onQueueLinks={(links) => handleLinks(links, appendTracks, importIntoQueue, queueLists)}
+              onLinks={(links, onTracks) => {
+                // A link dropped into a playlist carries no length either,
+                // and a playlist is a place tracks get queued from — so the
+                // same lookup runs here before the rows are made.
+                const intoPlaylist = (tracks: ParsedTrack[]) =>
+                  void resolvePlaylistTracks(trackMetadata, tracks).then(onTracks);
+                handleLinks(links, intoPlaylist, setPendingImport, (lists) =>
+                  intoPlaylist(lists.flatMap((list) => list.tracks)),
+                );
+              }}
               onLinkPlaylist={() => setLinkOpen(true)}
-              onImportPlaylists={setPendingImport}
+              // Loose tracks dropped on the playlist list have no playlist to
+              // land in, so they are ignored there.
+              onListLinks={(links) =>
+                handleLinks(links, () => {}, setPendingImport, listsAsNewPlaylists)
+              }
               onMoveMany={(itemIds, beforeItemId) => room.moveManyInMyQueue(itemIds, beforeItemId)}
               onSendToTop={(itemId) => room.sendToTopOfMyQueue(itemId)}
               onRemove={(itemId) => room.removeFromMyQueue(itemId)}
@@ -385,6 +397,8 @@ const STATUS_LINGER_MS = 4000;
 /** One resolved album or artist list, with the kind that produced it. */
 export interface ResolvedList {
   label: "album" | "artist";
+  /** The album or artist name. Null when the lookup failed. */
+  name: string | null;
   tracks: ParsedTrack[];
 }
 
@@ -457,7 +471,7 @@ function usePlaylistImport(): {
       void Promise.all(
         pending.map(async (item) => {
           const resolved = await listService.fetch(item.uri);
-          return { ...item, tracks: resolved.tracks };
+          return { ...item, name: resolved.name, tracks: resolved.tracks };
         }),
       ).then(
         (lists) => {

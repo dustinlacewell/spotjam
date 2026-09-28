@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PlaylistTrack, SharedPlaylist } from "@spotjam/protocol";
 import type { Playlist } from "../lib/playlists";
-import type { ParsedLinks, ParsedPlaylist, ParsedTrack } from "../lib/spotify-link";
+import type { ParsedLinks, ParsedTrack } from "../lib/spotify-link";
 import type { PlaylistsApi } from "./use-playlists";
 import { canEditItems, defaultPlaylistName, isEditable, tracksOf } from "../lib/playlists";
 import { PlaylistList } from "./PlaylistList";
@@ -26,7 +26,7 @@ export function DetailPane({
   onQueueLinks,
   onLinks,
   onLinkPlaylist,
-  onImportPlaylists,
+  onListLinks,
   onMoveMany,
   onSendToTop,
   onRemove,
@@ -52,8 +52,8 @@ export function DetailPane({
   onLinks: (links: ParsedLinks, onTracks: (tracks: PlaylistTrack[]) => void) => void;
   /** Opens the dialog that links a Spotify playlist. */
   onLinkPlaylist: () => void;
-  /** A playlist link dropped on the playlist list asks whether to copy or link it. */
-  onImportPlaylists: (playlists: ParsedPlaylist[]) => void;
+  /** Links dropped on the playlist list. */
+  onListLinks: (links: ParsedLinks) => void;
   onMoveMany: (itemIds: string[], beforeItemId: string | null) => void;
   onSendToTop: (itemId: string) => void;
   onRemove: (itemId: string) => void;
@@ -136,7 +136,7 @@ export function DetailPane({
         onCancelRename={() => setRenamingId(null)}
         onCreate={handleCreate}
         onLinkPlaylist={onLinkPlaylist}
-        onImportPlaylists={onImportPlaylists}
+        onLinks={onListLinks}
       />
 
       {openPlaylist ? (
