@@ -4,9 +4,9 @@ import { INTERNAL_DRAG_MIME } from "../lib/drop-links";
 import { tracksOf } from "../lib/selection";
 import { matchesTrack } from "../lib/track-search";
 import { QueueItemCard } from "./QueueItemCard";
-import { TrackContextMenu } from "./TrackContextMenu";
+import { TrackContextMenu } from "./track-menu/TrackContextMenu";
 import { useMultiSelect } from "./use-multi-select";
-import { useTrackContextMenu } from "./use-track-context-menu";
+import { useTrackContextMenu } from "./track-menu/use-track-context-menu";
 import { useTrackMetadataMap } from "./use-track-metadata";
 import styles from "./QueueLists.module.css";
 

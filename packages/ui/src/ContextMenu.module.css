@@ -47,3 +47,9 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.separator {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--border);
+}

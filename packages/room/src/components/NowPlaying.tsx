@@ -3,8 +3,8 @@ import { IconButton, ProgressBar, Thumbnail } from "@spotjam/ui";
 import type { QueueItem } from "@spotjam/protocol";
 import { trackProgressView } from "../lib/track-progress";
 import { toPlaylistTracks } from "../lib/selection";
-import { TrackContextMenu } from "./TrackContextMenu";
-import { useTrackContextMenu } from "./use-track-context-menu";
+import { TrackContextMenu } from "./track-menu/TrackContextMenu";
+import { useTrackContextMenu } from "./track-menu/use-track-context-menu";
 import { useTrackMetadata } from "./use-track-metadata";
 import styles from "./NowPlaying.module.css";
 

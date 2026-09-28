@@ -20,6 +20,7 @@ import type { ParsedAlbum, ParsedArtist, ParsedLinks, ParsedPlaylist, ParsedTrac
 import { useRoomServices } from "../services";
 import { usePlaylists } from "./use-playlists";
 import { PlaylistsProvider } from "./playlists-context";
+import { QueueActionsProvider } from "./queue-actions-context";
 import { NowPlaying } from "./NowPlaying";
 import { AttachChip } from "./AttachChip";
 import { BroadcastToggle } from "./BroadcastToggle";
@@ -199,6 +200,7 @@ export function QueueView({
 
   return (
     <PlaylistsProvider api={playlistsApi}>
+    <QueueActionsProvider actions={{ append: appendTracks }}>
     <div className={styles.page}>
       <header className={styles.header}>
         <Mark size="sm">
@@ -306,6 +308,7 @@ export function QueueView({
         onLink={linkAsNewPlaylist}
       />
     </div>
+    </QueueActionsProvider>
     </PlaylistsProvider>
   );
 }

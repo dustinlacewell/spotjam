@@ -39,7 +39,7 @@ export { CenteredCardPage } from "./CenteredCardPage";
 
 export { EngravedText } from "./EngravedText";
 
-export { ContextMenu, ContextMenuItem } from "./ContextMenu";
+export { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "./ContextMenu";
 export type { ContextMenuProps, ContextMenuItemProps } from "./ContextMenu";
 
 export { Modal } from "./Modal";

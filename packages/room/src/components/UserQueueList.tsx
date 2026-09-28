@@ -1,9 +1,9 @@
 import type { QueueItem } from "@spotjam/protocol";
 import { tracksOf } from "../lib/selection";
 import { QueueItemCard } from "./QueueItemCard";
-import { TrackContextMenu } from "./TrackContextMenu";
+import { TrackContextMenu } from "./track-menu/TrackContextMenu";
 import { useMultiSelect } from "./use-multi-select";
-import { useTrackContextMenu } from "./use-track-context-menu";
+import { useTrackContextMenu } from "./track-menu/use-track-context-menu";
 import styles from "./QueueLists.module.css";
 
 export function UserQueueList({

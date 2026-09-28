@@ -11,6 +11,8 @@ import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { clampToViewport } from "./context-menu-layout";
 import type { Point } from "./context-menu-layout";
+import { itemBelow, nextIndex, openingFocus } from "./context-menu-focus";
+import type { FocusTarget } from "./context-menu-focus";
 import styles from "./ContextMenu.module.css";
 
 const CloseContext = createContext<() => void>(() => {});
@@ -48,7 +50,8 @@ export function ContextMenu({ at, onClose, children }: ContextMenuProps) {
     if (placed === null) return;
     const el = ref.current;
     if (el === null) return;
-    focusables(el)[0]?.focus();
+    const targets = focusables(el);
+    targets[openingFocus(targets.map(targetOf))]?.focus();
   }, [placed]);
 
   useEffect(() => {
@@ -94,15 +97,16 @@ export function ContextMenu({ at, onClose, children }: ContextMenuProps) {
     if (el === null) return;
     const targets = focusables(el);
     if (targets.length === 0) return;
+    const kinds = targets.map(targetOf);
     const current = targets.indexOf(document.activeElement as HTMLElement);
-    const inInput = current >= 0 && isInput(targets[current]);
+    const inInput = kinds[current] === "field";
 
     if (event.key === "Enter") {
       if (!inInput) return;
-      const item = targets.find(isItem);
-      if (item === undefined) return;
+      const item = itemBelow(kinds, current);
+      if (item === null) return;
       event.preventDefault();
-      item.click();
+      targets[item]?.click();
       return;
     }
 
@@ -164,6 +168,11 @@ export function ContextMenuItem({
   );
 }
 
+/** A line between groups of items. Focus passes over it. */
+export function ContextMenuSeparator() {
+  return <div role="separator" className={styles.separator} />;
+}
+
 function focusables(root: HTMLElement): HTMLElement[] {
   return Array.from(
     root.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
@@ -172,29 +181,6 @@ function focusables(root: HTMLElement): HTMLElement[] {
   );
 }
 
-function isInput(el: HTMLElement | undefined): el is HTMLInputElement {
-  return el instanceof HTMLInputElement;
-}
-
-function isItem(el: HTMLElement): el is HTMLButtonElement {
-  return el instanceof HTMLButtonElement;
-}
-
-function nextIndex(
-  key: string,
-  current: number,
-  count: number,
-): number | null {
-  switch (key) {
-    case "ArrowDown":
-      return current < 0 ? 0 : (current + 1) % count;
-    case "ArrowUp":
-      return current < 0 ? count - 1 : (current - 1 + count) % count;
-    case "Home":
-      return 0;
-    case "End":
-      return count - 1;
-    default:
-      return null;
-  }
+function targetOf(el: HTMLElement): FocusTarget {
+  return el instanceof HTMLInputElement ? "field" : "item";
 }
